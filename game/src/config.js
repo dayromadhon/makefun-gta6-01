@@ -1,147 +1,110 @@
-// Solmar Heat — world constants, tuning and story data.
+// Solmar Heat — world constants, story, prices and tuning.
 // One job: every number the rest of the game agrees on lives here.
-
 export const WORLD = {
-  half: 100, // city spans -100..100 on x and z
-  streets: [-80, -40, 0, 40, 80], // avenue/street centre lines
+  grid: [-80, -40, 0, 40, 80], // street center lines (x and z)
+  half: 100, // city edge; beach starts past +100 z, marina past +100 x
   roadWidth: 10,
-  block: 30, // block edge length between roads
-  beachZ: -100, // sand starts south of this line
-  seaZ: -132, // water starts here
-  marinaX: 104, // docks start east of this line
-  seaLevel: -0.4,
+  block: 30, // block size between streets
 };
 
-export const COLORS = {
-  sky: 0x8ec9e8,
-  fog: 0xa8d4ea,
-  sun: 0xfff2d0,
-  ground: 0x9db98a, // dry grass between blocks
-  asphalt: 0x3a3f46,
-  roadLine: 0xd8d3a0,
-  sidewalk: 0xb9b3a4,
-  sand: 0xe6d29a,
-  sea: 0x2e7fa8,
-  dock: 0x8a6f4d,
-  buildingGlass: 0x9fc4d8,
-  buildingRoof: 0x6b6f78,
-  // warm stucco palette for the low city, glassy blue-grey for downtown
-  lowCity: [0xe8c39a, 0xd9a06f, 0xc98d64, 0xe0b184, 0xb98a6a, 0xd4c08a],
-  downtown: [0x7f9db5, 0x6d8fa8, 0x93aec2, 0x5f7f9c, 0x87a5bd],
-  carPaint: [0xc23b2e, 0x2e6fc2, 0xe0a92e, 0x3fae6a, 0xe8e4da, 0x22242a, 0x7a4fb5, 0xd97b2e],
-  taxiYellow: 0xf2c200,
-  policeWhite: 0xf2f2f2,
-  policeBlue: 0x1d4fd7,
+export const ECONOMY = {
+  startCash: 120,
+  debt: 4500,
+  bustFine: 150,
+  wastedFine: 100,
+  sideTaxiMin: 80,
+  sideTaxiMax: 200,
+  sideCourierMin: 120,
+  sideCourierMax: 260,
 };
 
-export const TUNE = {
+export const CAR = {
+  sedanAccel: 15,
+  sedanTop: 36,
+  taxiAccel: 14,
+  taxiTop: 34,
+  vanAccel: 11,
+  vanTop: 30,
+  policeAccel: 17,
+  policeTop: 40,
+  brake: 22,
+  reverseTop: 12,
+  steerBase: 1.9,
+  driftSteer: 3.1,
+  grip: 6.5,
+};
+
+export const PLAYER = {
   walkSpeed: 6,
-  runSpeed: 10,
-  carAccel: 14,
-  carReverseAccel: 9,
-  carMaxSpeed: 34,
-  carMaxReverse: 10,
-  carBrake: 26,
-  steerMax: 0.55, // radians of front-wheel angle at standstill
-  steerSpeedFalloff: 0.012, // less steering the faster you go
-  handbrakeGrip: 0.35, // lateral grip multiplier while drifting
-  trafficSpeed: 9,
-  trafficCount: 12,
-  trafficCountLow: 7,
-  pedCount: 14,
-  pedCountLow: 7,
-  pedSpeed: 2.2,
-  policeCarSpeed: 26,
-  policeFootSpeed: 5.4,
-  bustHoldSeconds: 1.6, // foot cop touching you this long busts you
-  bustCarSeconds: 3.0, // stopped with a cop car beside you this long busts you
-  wantedDecaySeconds: 25, // quiet time before one star fades
-  playerHealth: 100,
-  pistolMag: 12,
+  runSpeed: 9,
+  health: 100,
+  fistDamage: 12,
   pistolDamage: 34,
-  fistDamage: 18,
-  fistRange: 2.6,
-  shootRange: 60,
+  pistolMag: 12,
+  pistolRange: 55,
 };
 
-// Story places. All coordinates are world x/z.
-export const PLACES = {
-  spawn: { x: -40, z: 40 },
-  garage: { x: -80, z: 80, label: "Ada's Garage" },
-  hotel: { x: 80, z: 80, label: 'Hotel Solmar' },
-  marina: { x: 118, z: 20, label: 'Marina Dock' },
-  pier: { x: 0, z: -128, label: 'South Pier' },
-  hideout: { x: -80, z: -80, label: 'Hideout' },
-  clinic: { x: 40, z: -80, label: 'Clinic' },
-};
-
-// The five story missions, in order. A step is one objective:
-//   goto  — reach the marker (drive or walk)
-//   steal — steal the marked car, then goto
-//   pickup — stand at the marker to collect, then goto
-//   evade — reach the marker while wanted, then hold still there
-//   taxi  — carry N fares: goto pickup, then goto drop, repeat
+// Story missions, in order. Each has an id, a title, a short brief and a
+// reward. The missions module turns these into objectives at runtime.
 export const MISSIONS = [
   {
     id: 'first-wheels',
     title: 'First Wheels',
-    payout: 400,
-    briefing:
-      "Ada needs a car for the garage and you need cash. Steal the marked sedan and bring it to Ada's Garage.",
-    steps: [
-      { kind: 'steal', car: 'sedan', at: { x: -40, z: 80 }, text: 'Steal the marked sedan' },
-      { kind: 'goto', at: { x: -80, z: 80 }, text: "Drive it to Ada's Garage" },
-    ],
+    reward: 400,
+    brief: 'Ada needs wheels. Steal a parked sedan and bring it to her garage on the west side.',
   },
   {
     id: 'package-run',
     title: 'Package Run',
-    payout: 600,
-    timeLimit: 100,
-    briefing:
-      'A package is waiting at the Marina Dock. Pick it up and get it to Hotel Solmar before the clock runs out.',
-    steps: [
-      { kind: 'pickup', at: { x: 118, z: 20 }, text: 'Pick up the package at the Marina Dock' },
-      { kind: 'goto', at: { x: 80, z: 80 }, text: 'Deliver it to Hotel Solmar', timed: true },
-    ],
+    reward: 600,
+    brief: 'Pick up the package at the marina and deliver it to the Hotel Solmar. The clock is running.',
   },
   {
-    id: 'lose-the-heat',
+    id: 'lose-heat',
     title: 'Lose the Heat',
-    payout: 800,
-    briefing:
-      'The job went loud and the police are on you. Two stars and climbing — get to the South Pier and lay low until the heat dies.',
-    steps: [
-      { kind: 'evade', at: { x: 0, z: -128 }, text: 'Reach the South Pier with the cops behind you' },
-      { kind: 'hide', at: { x: 0, z: -128 }, text: 'Lay low at the pier until the heat is gone', holdSeconds: 8 },
-    ],
+    reward: 800,
+    brief: 'The cops are on you — two stars. Break away and hide out at the South Pier until they lose you.',
   },
   {
     id: 'night-shift',
     title: 'Night Shift',
-    payout: 900,
-    briefing:
-      'Ada lent you a taxi for the evening. Three fares are waiting around the city — pick them up and drop them off.',
-    steps: [{ kind: 'taxi', fares: 3, text: 'Carry 3 taxi fares' }],
+    reward: 900,
+    brief: 'Three fares, one night. Pick up passengers and drop them where they need to be.',
   },
   {
     id: 'big-score',
     title: 'The Big Score',
-    payout: 2000,
-    briefing:
-      'The courier van is parked by the marina, full of Rocco’s money. Steal it and bring it to the Hideout. This one pays the debt.',
-    steps: [
-      { kind: 'steal', car: 'van', at: { x: 104, z: -20 }, text: 'Steal the courier van' },
-      { kind: 'goto', at: { x: -80, z: -80 }, text: 'Bring it to the Hideout' },
-    ],
+    reward: 2000,
+    brief: 'Steal the courier van from the east depot and bring it to the hideout. This one clears the debt.',
   },
 ];
 
-export const SIDE_JOBS = {
-  taxiFare: { min: 150, max: 320 },
-  courier: { min: 250, max: 450 },
+// Named places on the map (x, z). Missions and side jobs point at these.
+export const PLACES = {
+  garage: { x: -80, z: 80, label: "Ada's Garage" },
+  marinaPickup: { x: 112, z: 40, label: 'Marina Pickup' },
+  hotel: { x: 40, z: -40, label: 'Hotel Solmar' },
+  pier: { x: 0, z: 112, label: 'South Pier' },
+  depot: { x: 80, z: -80, label: 'East Depot' },
+  hideout: { x: -80, z: -80, label: 'Hideout' },
+  hospital: { x: -40, z: -80, label: 'Clinic' },
+  start: { x: 24, z: 80, label: 'Start' },
+  sedanSpot: { x: 12, z: 80, label: 'Parked Sedan' },
+  vanSpot: { x: 84, z: -72, label: 'Courier Van' },
 };
 
-export const SAVE_KEY = 'solmar-heat-save-v1';
-export const START_CASH = 120;
-export const DEBT_TOTAL = 4500;
+export const COLORS = {
+  sky: 0x87b5d6,
+  fog: 0x9fc3d8,
+  sun: 0xfff2d8,
+  ground: 0x8a8f7a,
+  sidewalk: 0x9a9a94,
+  road: 0x3a3d42,
+  sand: 0xdcc28e,
+  sea: 0x2e7f9e,
+  marina: 0x6b7a86,
+  leo: 0xc23b2e,
+  police: 0x1c2f4a,
+  taxi: 0xf2c200,
+  van: 0xe8e8e8,
+};

@@ -1,73 +1,74 @@
-// Solmar Heat — the chase camera.
-// One job: put the camera behind the player or the car, smoothly, and let
-// a right-drag orbit it. Forward is (sin(yaw), cos(yaw)) in (x, z).
+// Solmar Heat — the chase camera. One job: a third-person camera that
+// sits behind Leo on foot and behind the car while driving, with mouse
+// orbit, wheel zoom and screen shake.
+import { clamp, lerp, angleDiff } from './random.js';
 
-export function createCamera(camera) {
-  const cam = {
-    yaw: 0, // follows the player's heading when free
-    orbit: 0, // extra yaw from dragging, decays back to 0
-    pitch: 0.32, // radians above the horizon
-    dist: 11,
-    height: 5,
-    shake: 0,
-    shakeX: 0,
-    shakeY: 0,
-  };
-
-  function update(dt, ctx) {
-    const player = ctx.player;
-    const input = ctx.input;
-    // right-drag orbits (left click is shoot)
-    if (input.dragging && input.mouseButton === 2) {
-      cam.orbit -= input.dragDX * 0.005;
-      cam.pitch = Math.max(0.1, Math.min(1.0, cam.pitch + input.dragDY * 0.003));
-    } else {
-      // ease the orbit back so the camera settles behind the player
-      cam.orbit *= Math.max(0, 1 - 1.2 * dt);
-    }
-    // the yaw to follow: the car's heading when driving, the player's
-    // movement heading on foot, plus any orbit offset
-    let targetYaw;
-    if (player.inCar && player.car) {
-      targetYaw = player.car.heading;
-      cam.dist += ((13 - cam.dist) * Math.min(1, 3 * dt));
-      cam.height += ((6.5 - cam.height) * Math.min(1, 3 * dt));
-    } else {
-      targetYaw = player.heading;
-      cam.dist += ((10 - cam.dist) * Math.min(1, 3 * dt));
-      cam.height += ((5 - cam.height) * Math.min(1, 3 * dt));
-    }
-    let diff = targetYaw + cam.orbit - cam.yaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    cam.yaw += diff * Math.min(1, 4 * dt);
-    player.yaw = cam.yaw;
-
-    const fx = Math.sin(cam.yaw);
-    const fz = Math.cos(cam.yaw);
-    const tx = player.x;
-    const tz = player.z;
-    const back = cam.dist * Math.cos(cam.pitch);
-    const up = cam.dist * Math.sin(cam.pitch) + cam.height * 0.4;
-    camera.position.set(tx - fx * back, up, tz - fz * back);
-    if (cam.shake > 0.01) {
-      cam.shakeX = (Math.random() - 0.5) * cam.shake;
-      cam.shakeY = (Math.random() - 0.5) * cam.shake;
-      cam.shake *= Math.max(0, 1 - 4 * dt);
-    } else {
-      cam.shakeX = 0;
-      cam.shakeY = 0;
-    }
-    camera.position.x += cam.shakeX;
-    camera.position.y += cam.shakeY;
-    camera.lookAt(tx + fx * 4, 1.6, tz + fz * 4);
+export class CameraRig {
+  constructor(camera, fxLow) {
+    this.camera = camera;
+    this.fxLow = fxLow;
+    this.yaw = Math.PI; // orbit yaw; PI looks north (-z)
+    this.pitch = 0.42;
+    this.dist = 9;
+    this.dragOffset = 0; // temporary yaw offset from mouse drag while driving
+    this.shake = 0;
+    this.pos = new THREE.Vector3(24, 8, 95);
   }
 
-  function addShake(amount) {
-    cam.shake = Math.min(1.2, cam.shake + amount);
+  addShake(amount) {
+    this.shake = Math.min(1.2, this.shake + amount);
   }
 
-  cam.update = update;
-  cam.addShake = addShake;
-  return cam;
+  update(dt, player, input) {
+    // Mouse drag orbits the camera.
+    if (input.mouseDX !== 0) {
+      this.yaw -= input.mouseDX * 0.0042;
+      if (player.inCar) this.dragOffset -= input.mouseDX * 0.0042;
+    }
+    if (input.mouseDY !== 0) {
+      this.pitch = clamp(this.pitch + input.mouseDY * 0.002, 0.12, 1.0);
+    }
+    if (input.wheel !== 0) {
+      this.dist = clamp(this.dist + input.wheel * 0.005, 5, 16);
+    }
+    const targetDist = player.inCar ? 10.5 : 7;
+    this.dist = lerp(this.dist, targetDist, 1 - Math.exp(-2 * dt));
+    // On foot the camera yaw IS the player's facing (mouse drag steers
+    // Leo); while driving it eases back behind the car and the drag
+    // offset decays.
+    if (!player.inCar) {
+      player.yaw = this.yaw;
+      this.dragOffset = 0;
+    } else {
+      this.dragOffset *= Math.exp(-1.4 * dt);
+      const want = player.heading + Math.PI + this.dragOffset;
+      this.yaw += angleDiff(this.yaw, want) * (1 - Math.exp(-2.6 * dt));
+    }
+    const px = player.x;
+    const pz = player.z;
+    const eyeX = px + Math.sin(this.yaw) * Math.cos(this.pitch) * this.dist;
+    const eyeZ = pz + Math.cos(this.yaw) * Math.cos(this.pitch) * this.dist;
+    const eyeY = 1.6 + Math.sin(this.pitch) * this.dist + (player.inCar ? 1.2 : 0.4);
+    const k = 1 - Math.exp(-14 * dt);
+    this.pos.x += (eyeX - this.pos.x) * k;
+    this.pos.y += (eyeY - this.pos.y) * k;
+    this.pos.z += (eyeZ - this.pos.z) * k;
+    this.shake = Math.max(0, this.shake - dt * 2.2);
+    const sh = this.fxLow ? 0 : this.shake;
+    const sx = sh > 0 ? (Math.random() - 0.5) * sh * 0.5 : 0;
+    const sy = sh > 0 ? (Math.random() - 0.5) * sh * 0.4 : 0;
+    this.camera.position.set(this.pos.x + sx, this.pos.y + sy, this.pos.z);
+    const lookX = px - Math.sin(this.yaw) * 4;
+    const lookZ = pz - Math.cos(this.yaw) * 4;
+    this.camera.lookAt(lookX, 1.6, lookZ);
+  }
+
+  // A slow orbit for the title screen backdrop.
+  titleOrbit(dt, time) {
+    const a = time * 0.05;
+    const cx = Math.sin(a) * 55;
+    const cz = Math.cos(a) * 55 - 10;
+    this.camera.position.set(cx, 26, cz);
+    this.camera.lookAt(0, 4, -10);
+  }
 }

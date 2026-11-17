@@ -1,252 +1,220 @@
-// Solmar Heat — Leo Marin on foot: walking, stealing cars, fighting.
-// One job: the player character when they are not behind a wheel.
+// Solmar Heat — Leo Marin on foot. One job: walking, getting in and out
+// of cars, and combat (fists and pistol) when not driving.
+import { PLAYER, PLACES, ECONOMY } from './config.js';
+import { clamp, dist2d, angleDiff } from './random.js';
 
-import { TUNE } from './config.js';
-
-const THREE = window.THREE;
-
-function makePlayerMesh() {
-  const g = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6fc2 });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.95, 0.42), jacket);
-  torso.position.y = 1.05;
-  g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe8b98a }));
-  head.position.y = 1.78;
-  g.add(head);
-  const legMat = new THREE.MeshLambertMaterial({ color: 0x22242a });
-  for (const sx of [-0.19, 0.19]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.62, 0.26), legMat);
-    leg.position.set(sx, 0.31, 0);
-    g.add(leg);
+export class Player {
+  constructor(scene, city, rng, fxLow, hooks) {
+    this.scene = scene;
+    this.city = city;
+    this.rng = rng;
+    this.fxLow = fxLow;
+    this.hooks = hooks; // { onShoot(x,z,heading), onPunch(), onEnterCar(), onExitCar() }
+    this.x = PLACES.start.x;
+    this.z = PLACES.start.z;
+    this.yaw = Math.PI; // camera-relative facing; PI = facing -z (north)
+    this.health = PLAYER.health;
+    this.cash = ECONOMY.startCash;
+    this.inCar = false;
+    this.car = null;
+    this.weapon = 'fists'; // 'fists' | 'pistol'
+    this.ammo = PLAYER.pistolMag;
+    this.punchCooldown = 0;
+    this.shootCooldown = 0;
+    this.mesh = this.makeMesh();
+    scene.add(this.mesh);
+    this.updateMesh();
   }
-  // a pistol in the right hand when armed
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.5), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  gun.position.set(0.48, 1.05, 0.25);
-  gun.name = 'gun';
-  g.add(gun);
-  return g;
-}
 
-// Heading convention everywhere: forward = (sin(a), cos(a)) in (x, z).
-// So W with camera yaw Y walks along (sin Y, cos Y), and D strafes right
-// along (-cos Y, sin Y).
+  makeMesh() {
+    const g = new THREE.Group();
+    const jacket = new THREE.MeshLambertMaterial({ color: 0xc23b2e });
+    const jeans = new THREE.MeshLambertMaterial({ color: 0x2a3a5a });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, 1.1, 8), jacket);
+    body.position.y = 0.98;
+    body.castShadow = !this.fxLow;
+    g.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), skin);
+    head.position.y = 1.78;
+    head.castShadow = !this.fxLow;
+    g.add(head);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.5, 0.32), jeans);
+    legs.position.y = 0.25;
+    g.add(legs);
+    // Pistol in hand when armed.
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.5), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+    gun.position.set(0.42, 1.05, 0.3);
+    gun.name = 'gun';
+    gun.visible = false;
+    g.add(gun);
+    g.userData.gun = gun;
+    return g;
+  }
 
-export function createPlayer(scene, spawn) {
-  const mesh = makePlayerMesh();
-  scene.add(mesh);
-  const player = {
-    mesh,
-    x: spawn.x,
-    z: spawn.z,
-    heading: 0, // body facing
-    yaw: 0, // camera yaw the player moves relative to
-    speed: 0,
-    health: TUNE.playerHealth,
-    inCar: false,
-    car: null,
-    weapon: 'pistol',
-    mag: TUNE.pistolMag,
-    reserve: 96,
-    reloading: 0,
-    punchCooldown: 0,
-    shootCooldown: 0,
-    down: false,
-  };
+  updateMesh() {
+    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.rotation.y = this.yaw;
+    this.mesh.visible = !this.inCar;
+    if (this.mesh.userData.gun) {
+      this.mesh.userData.gun.visible = !this.inCar && this.weapon === 'pistol';
+    }
+  }
 
-  function updateOnFoot(dt, ctx) {
-    const input = ctx.input;
-    const axis = input.moveAxis();
-    const running = input.down('ShiftLeft') || input.down('ShiftRight');
-    const maxSpeed = running ? TUNE.runSpeed : TUNE.walkSpeed;
-    const targetSpeed = Math.hypot(axis.x, axis.y) > 0.1 ? maxSpeed : 0;
-    player.speed += (targetSpeed - player.speed) * Math.min(1, 8 * dt);
-    if (player.speed > 0.1) {
-      const fx = Math.sin(player.yaw) * axis.y - Math.cos(player.yaw) * axis.x;
-      const fz = Math.cos(player.yaw) * axis.y + Math.sin(player.yaw) * axis.x;
-      player.x += fx * player.speed * dt;
-      player.z += fz * player.speed * dt;
-      const want = Math.atan2(fx, fz);
-      let diff = want - player.heading;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      player.heading += Math.max(-8 * dt, Math.min(8 * dt, diff));
-      const res = ctx.city.resolveCircle(player.x, player.z, 0.8);
-      player.x = res.x;
-      player.z = res.z;
+  // Per-frame on-foot movement. camYaw: the camera's yaw; forward is
+  // camera-relative (W walks away from the camera).
+  updateOnFoot(dt, input, camYaw) {
+    this.punchCooldown = Math.max(0, this.punchCooldown - dt);
+    this.shootCooldown = Math.max(0, this.shootCooldown - dt);
+    let mx = 0;
+    let mz = 0;
+    if (input.down('KeyW') || input.down('ArrowUp')) mz += 1;
+    if (input.down('KeyS') || input.down('ArrowDown')) mz -= 1;
+    if (input.down('KeyA') || input.down('ArrowLeft')) mx -= 1;
+    if (input.down('KeyD') || input.down('ArrowRight')) mx += 1;
+    const run = input.down('ShiftLeft') || input.down('ShiftRight');
+    const speed = run ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    if (mx !== 0 || mz !== 0) {
+      // Camera-relative: forward is the direction the camera looks.
+      const fx = Math.sin(camYaw);
+      const fz = Math.cos(camYaw);
+      const rx = Math.cos(camYaw);
+      const rz = -Math.sin(camYaw);
+      let dx = fx * mz + rx * mx;
+      let dz = fz * mz + rz * mx;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len;
+      dz /= len;
+      // Face the direction of travel when moving forward or back; a pure
+      // strafe keeps Leo facing the camera.
+      if (mz !== 0) this.yaw = Math.atan2(dx, dz);
+      let nx = this.x + dx * speed * dt;
+      let nz = this.z + dz * speed * dt;
+      nx = clamp(nx, -128, 132);
+      nz = clamp(nz, -128, 138);
+      [nx, nz] = this.city.resolveSolids(nx, nz, 0.5);
+      this.x = nx;
+      this.z = nz;
     }
-    // weapon toggle
-    if (input.wasPressed('KeyQ')) {
-      player.weapon = player.weapon === 'pistol' ? 'fists' : 'pistol';
-      if (ctx.hud) ctx.hud.toast(player.weapon === 'pistol' ? 'Pistol out' : 'Fists out');
-    }
-    // reload
-    if (input.wasPressed('KeyR') && player.weapon === 'pistol' && player.mag < TUNE.pistolMag && player.reloading <= 0) {
-      player.reloading = 1.0;
-    }
-    if (player.reloading > 0) {
-      player.reloading -= dt;
-      if (player.reloading <= 0) {
-        const need = TUNE.pistolMag - player.mag;
-        const take = Math.min(need, player.reserve);
-        player.mag += take;
-        player.reserve -= take;
+    this.updateMesh();
+    return { moving: mx !== 0 || mz !== 0 };
+  }
+
+  // Try to steal the nearest parked car. Returns the car or null.
+  trySteal(vehicles) {
+    if (this.inCar) return null;
+    const car = vehicles.nearestParked(this.x, this.z, 4.5);
+    if (!car) return null;
+    vehicles.steal(car);
+    this.inCar = true;
+    this.car = car;
+    this.x = car.x;
+    this.z = car.z;
+    this.yaw = car.heading;
+    this.updateMesh();
+    if (this.hooks.onEnterCar) this.hooks.onEnterCar(car);
+    return car;
+  }
+
+  // Step out of the car beside it.
+  exitCar(vehicles) {
+    if (!this.inCar || !this.car) return;
+    const car = vehicles.abandon();
+    const side = this.yaw + Math.PI / 2;
+    this.x = car.x + Math.sin(side) * 2.4;
+    this.z = car.z + Math.cos(side) * 2.4;
+    [this.x, this.z] = this.city.resolveSolids(this.x, this.z, 0.5);
+    this.inCar = false;
+    this.car = null;
+    this.updateMesh();
+    if (this.hooks.onExitCar) this.hooks.onExitCar();
+  }
+
+  // Sync the on-foot position to the driven car (called every frame while
+  // driving so missions, camera, minimap and wanted all read the car).
+  syncToCar() {
+    if (!this.inCar || !this.car) return;
+    this.x = this.car.x;
+    this.z = this.car.z;
+    this.yaw = this.car.heading;
+    this.updateMesh();
+  }
+
+  get carSpeed() {
+    return this.inCar && this.car ? this.car.speed : 0;
+  }
+
+  get heading() {
+    return this.inCar && this.car ? this.car.heading : this.yaw;
+  }
+
+  toggleWeapon() {
+    this.weapon = this.weapon === 'fists' ? 'pistol' : 'fists';
+    if (this.weapon === 'pistol' && this.ammo <= 0) this.ammo = 0;
+    this.updateMesh();
+    return this.weapon;
+  }
+
+  reload() {
+    if (this.weapon !== 'pistol') return false;
+    if (this.ammo === PLAYER.pistolMag) return false;
+    this.ammo = PLAYER.pistolMag;
+    return true;
+  }
+
+  // Melee: hurt the nearest ped or cop within reach in front of Leo.
+  punch(targets) {
+    if (this.inCar || this.punchCooldown > 0) return false;
+    this.punchCooldown = 0.45;
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    for (const t of targets) {
+      const dx = t.x - this.x;
+      const dz = t.z - this.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 2.2 && (dx * fx + dz * fz) / (d || 1) > 0.3) {
+        if (this.hooks.onPunch) this.hooks.onPunch(t);
+        return true;
       }
     }
-    player.punchCooldown -= dt;
-    player.shootCooldown -= dt;
-    // left click: punch up close, or shoot
-    if (input.mouseDown && input.mouseButton === 0) {
-      if (player.weapon === 'fists') {
-        if (player.punchCooldown <= 0) {
-          player.punchCooldown = 0.45;
-          punch(ctx);
-        }
-      } else if (player.shootCooldown <= 0 && player.reloading <= 0) {
-        if (player.mag > 0) {
-          player.shootCooldown = 0.22;
-          shoot(ctx);
-        } else {
-          player.shootCooldown = 0.3;
-          if (ctx.audio) ctx.audio.denied();
-        }
-      }
+    if (this.hooks.onPunch) this.hooks.onPunch(null);
+    return true;
+  }
+
+  // Fire the pistol straight ahead. Returns the bullet ray for hit tests.
+  shoot() {
+    if (this.inCar || this.weapon !== 'pistol') return null;
+    if (this.shootCooldown > 0 || this.ammo <= 0) return null;
+    this.shootCooldown = 0.28;
+    this.ammo -= 1;
+    const ray = {
+      x: this.x,
+      z: this.z,
+      dx: Math.sin(this.yaw),
+      dz: Math.cos(this.yaw),
+      range: PLAYER.pistolRange,
+    };
+    if (this.hooks.onShoot) this.hooks.onShoot(ray);
+    return ray;
+  }
+
+  hurt(amount) {
+    this.health = Math.max(0, this.health - amount);
+    return this.health;
+  }
+
+  heal(amount) {
+    this.health = Math.min(PLAYER.health, this.health + amount);
+  }
+
+  respawnAt(x, z) {
+    this.x = x;
+    this.z = z;
+    if (this.inCar) {
+      this.inCar = false;
+      this.car = null;
     }
-    mesh.visible = true;
-    mesh.position.set(player.x, 0, player.z);
-    mesh.rotation.y = player.heading;
-    mesh.getObjectByName('gun').visible = player.weapon === 'pistol';
-    // walk bob
-    mesh.position.y = player.speed > 0.5 ? Math.abs(Math.sin(performance.now() * 0.012)) * 0.06 : 0;
+    this.health = PLAYER.health;
+    this.updateMesh();
   }
-
-  function punch(ctx) {
-    if (ctx.audio) ctx.audio.punch();
-    const fx = Math.sin(player.heading);
-    const fz = Math.cos(player.heading);
-    const ped = ctx.peds ? ctx.peds.nearest(player.x + fx * 1.5, player.z + fz * 1.5, TUNE.fistRange) : null;
-    if (ped) {
-      ctx.peds.knockDown(ped, player.x, player.z);
-      if (ctx.effects) ctx.effects.sparks(ped.x, 1.2, ped.z, 6);
-      if (ctx.onCrime) ctx.onCrime('assault', ped.x, ped.z);
-    }
-  }
-
-  function shoot(ctx) {
-    player.mag -= 1;
-    if (ctx.audio) ctx.audio.shot();
-    // aim along the camera yaw
-    const fx = Math.sin(player.yaw);
-    const fz = Math.cos(player.yaw);
-    if (ctx.effects) ctx.effects.muzzle(player.x + fx * 0.5, 1.3, player.z + fz * 0.5, player.yaw);
-    let best = null;
-    let bestD = TUNE.shootRange;
-    if (ctx.peds) {
-      for (const ped of ctx.peds.peds) {
-        if (ped.state === 'down') continue;
-        const dx = ped.x - player.x;
-        const dz = ped.z - player.z;
-        const d = Math.hypot(dx, dz);
-        if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.01) > 0.92) {
-          bestD = d;
-          best = { kind: 'ped', target: ped };
-        }
-      }
-      for (const cop of ctx.peds.cops) {
-        if (!cop.active || cop.state === 'down') continue;
-        const dx = cop.x - player.x;
-        const dz = cop.z - player.z;
-        const d = Math.hypot(dx, dz);
-        if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.01) > 0.92) {
-          bestD = d;
-          best = { kind: 'cop', target: cop };
-        }
-      }
-    }
-    if (best) {
-      const t = best.target;
-      if (best.kind === 'ped') {
-        ctx.peds.knockDown(t, player.x, player.z);
-        if (ctx.onCrime) ctx.onCrime('shooting', t.x, t.z);
-        if (ctx.peds) ctx.peds.fleeAll(t.x, t.z);
-      } else {
-        t.state = 'down';
-        t.downTimer = 4;
-        t.mesh.rotation.x = Math.PI / 2 - 0.15;
-        t.mesh.position.y = 0.3;
-        if (ctx.onCrime) ctx.onCrime('shoot-cop', t.x, t.z);
-      }
-      if (ctx.effects) ctx.effects.sparks(t.x, 1.2, t.z, 8);
-    }
-  }
-
-  function takeDamage(amount, ctx) {
-    if (player.down) return;
-    player.health -= amount;
-    if (ctx.hud) ctx.hud.flashDamage();
-    if (player.health <= 0) {
-      player.health = 0;
-      player.down = true;
-      if (ctx.onDown) ctx.onDown();
-    }
-  }
-
-  function enterCar(car, ctx) {
-    player.inCar = true;
-    player.car = car;
-    mesh.visible = false;
-    if (ctx.audio) ctx.audio.pickup();
-  }
-
-  // While driving, Leo IS the car: every system that reads player.x/z
-  // (missions, wanted, camera, peds, minimap) must see the car's position.
-  function updateInCar() {
-    if (!player.car) return;
-    player.x = player.car.x;
-    player.z = player.car.z;
-    player.heading = player.car.heading;
-    player.speed = player.car.speed;
-  }
-
-  function exitCar(ctx) {
-    if (!player.car) return;
-    const car = player.car;
-    player.inCar = false;
-    player.car = null;
-    // step out on the driver's side
-    const sx = Math.cos(car.heading);
-    const sz = -Math.sin(car.heading);
-    player.x = car.x + sx * 2.4;
-    player.z = car.z + sz * 2.4;
-    player.heading = car.heading;
-    const res = ctx.city.resolveCircle(player.x, player.z, 0.8);
-    player.x = res.x;
-    player.z = res.z;
-    mesh.visible = true;
-    mesh.position.set(player.x, 0, player.z);
-  }
-
-  function reset(spawnPoint) {
-    player.x = spawnPoint.x;
-    player.z = spawnPoint.z;
-    player.heading = 0;
-    player.yaw = 0;
-    player.speed = 0;
-    player.health = TUNE.playerHealth;
-    player.inCar = false;
-    player.car = null;
-    player.mag = TUNE.pistolMag;
-    player.reserve = 96;
-    player.down = false;
-    mesh.visible = true;
-    mesh.position.set(player.x, 0, player.z);
-  }
-
-  player.updateOnFoot = updateOnFoot;
-  player.updateInCar = updateInCar;
-  player.takeDamage = takeDamage;
-  player.enterCar = enterCar;
-  player.exitCar = exitCar;
-  player.reset = reset;
-  return player;
 }

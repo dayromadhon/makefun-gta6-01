@@ -1,83 +1,89 @@
-// Solmar Heat — keyboard and mouse state.
-// One job: turn DOM events into a plain object the game reads every frame.
+// Solmar Heat — keyboard and mouse input. One job: turn raw DOM events
+// into a clean per-frame input state the player and camera read.
+export class Input {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.pressed = new Set(); // keys pressed since last frame (edge-triggered)
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.mouseDown = false;
+    this.dragging = false;
+    this.clickX = 0;
+    this.clickY = 0;
+    this.clicked = false; // left mouse button clicked since last frame
+    this.wheel = 0;
+    this.canvas = canvas;
 
-export function createInput(canvas) {
-  const keys = new Set();
-  const state = {
-    keys,
-    // one-shot actions: set true on the keydown, cleared by the game after
-    // it has consumed them exactly once (so a press never fires twice).
-    pressed: new Set(),
-    mouseDown: false,
-    mouseButton: -1,
-    dragDX: 0,
-    dragDY: 0,
-    dragging: false,
-    pointerLocked: false,
-  };
-  let lastX = 0;
-  let lastY = 0;
-
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    keys.add(e.code);
-    state.pressed.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this.pressed.add(e.code);
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.clicked = true;
+        this.clickX = e.clientX;
+        this.clickY = e.clientY;
+      }
+      if (e.button === 2) this.dragging = true;
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+      if (e.button === 2) this.dragging = false;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (this.dragging) {
+        this.mouseDX += e.movementX || 0;
+        this.mouseDY += e.movementY || 0;
+      }
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('wheel', (e) => {
+      this.wheel += e.deltaY;
       e.preventDefault();
-    }
-  });
-  window.addEventListener('keyup', (e) => keys.delete(e.code));
-  window.addEventListener('blur', () => {
-    keys.clear();
-    state.pressed.clear();
-    state.mouseDown = false;
-    state.dragging = false;
-  });
+    }, { passive: false });
+  }
 
-  canvas.addEventListener('mousedown', (e) => {
-    state.mouseDown = true;
-    state.mouseButton = e.button;
-    state.dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-  });
-  window.addEventListener('mouseup', () => {
-    state.mouseDown = false;
-    state.dragging = false;
-    state.mouseButton = -1;
-  });
-  window.addEventListener('mousemove', (e) => {
-    if (!state.dragging) return;
-    state.dragDX += e.clientX - lastX;
-    state.dragDY += e.clientY - lastY;
-    lastX = e.clientX;
-    lastY = e.clientY;
-  });
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  down(code) {
+    return this.keys.has(code);
+  }
 
-  state.down = (code) => keys.has(code);
-  state.wasPressed = (code) => state.pressed.has(code);
-  // Call once per frame after the game has read the presses.
-  state.endFrame = () => {
-    state.pressed.clear();
-    state.dragDX = 0;
-    state.dragDY = 0;
-  };
-  // Movement axes from WASD + arrows, in camera space: forward is -z of the
-  // camera yaw, right is +x of it.
-  state.moveAxis = () => {
-    let x = 0;
-    let y = 0;
-    if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
-    if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
-    if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
-    if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
-    const len = Math.hypot(x, y);
-    if (len > 1) {
-      x /= len;
-      y /= len;
-    }
-    return { x, y };
-  };
-  return state;
+  // True once, on the frame the key went down.
+  hit(code) {
+    return this.pressed.has(code);
+  }
+
+  // Steering: -1 (left) .. +1 (right), from A/D or arrow keys.
+  steer() {
+    let s = 0;
+    if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
+    if (this.down('KeyD') || this.down('ArrowRight')) s += 1;
+    return s;
+  }
+
+  throttle() {
+    let t = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) t += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) t -= 1;
+    return t;
+  }
+
+  // Call at the end of each frame to clear edge-triggered state.
+  endFrame() {
+    this.pressed.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.clicked = false;
+    this.wheel = 0;
+  }
 }

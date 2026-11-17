@@ -1,9 +1,8 @@
-// Solmar Heat — deterministic random numbers.
-// One job: a small seeded generator so screenshots and play-tests replay.
-
+// Solmar Heat — deterministic random numbers. One job: a seeded RNG so
+// screenshots and play-tests replay the same city every time.
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function next() {
+  return function () {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -12,23 +11,45 @@ export function mulberry32(seed) {
   };
 }
 
+export function pick(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
 export function range(rng, min, max) {
   return min + rng() * (max - min);
 }
 
-export function pick(rng, list) {
-  return list[Math.floor(rng() * list.length)];
+export function intRange(rng, min, max) {
+  return min + Math.floor(rng() * (max - min + 1));
 }
 
-export function chance(rng, p) {
-  return rng() < p;
+export function shuffle(rng, arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = a[i];
+    a[i] = a[j];
+    a[j] = t;
+  }
+  return a;
 }
 
-// A stable per-index seed, so the same street corner always gets the same
-// parked car, palm or pedestrian across runs with the same world seed.
-export function seedFor(worldSeed, salt, index) {
-  let h = worldSeed >>> 0;
-  h = Math.imul(h ^ salt, 2654435761);
-  h = Math.imul(h ^ index, 40503);
-  return (h ^ (h >>> 13)) >>> 0;
+export function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// Shortest signed angle from a to b, in (-PI, PI].
+export function angleDiff(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d <= -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+export function dist2d(ax, az, bx, bz) {
+  return Math.hypot(ax - bx, az - bz);
 }
