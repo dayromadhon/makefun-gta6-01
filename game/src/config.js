@@ -1,61 +1,111 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Solmar Heat — every tuning number in one place. The city is a 5x5 street grid on the
+// X/Z plane (metres), a sand beach along the south edge and open water beyond it. Nothing
+// here depends on the screen size; the renderer scales the canvas to the window.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
 export const STEP = 1 / 60;
+export const SAVE_KEY = 'solmar-heat.save.v1';
+
+export const CITY = {
+  pitch: 84, // distance between neighbouring street centrelines
+  streets: [-168, -84, 0, 84, 168], // street centrelines on each axis
+  roadHalf: 7, // half the asphalt width
+  blockHalf: 35, // half a block (building ground) between two streets
+  extent: 210, // city edge on each axis
+  beachZ: 224, // sand starts here (south edge, +Z)
+  waterZ: 258, // water plane starts here
+  marinaX: 224, // docks start here (east edge, +X)
+};
 
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  walkSpeed: 6,
+  runSpeed: 10,
+  accel: 42,
+  jumpSpeed: 7.5,
+  radius: 0.55,
+  height: 1.8,
+  maxHealth: 100,
+  punchDamage: 12,
+  punchRange: 1.9,
+  punchCooldown: 0.45,
+  pistolDamage: 34,
+  pistolRange: 60,
+  pistolCooldown: 0.28,
+  pistolMag: 12,
+  reloadTime: 1.1,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const CAR = {
+  accel: 26,
+  reverseAccel: 16,
+  brake: 42,
+  maxSpeed: 42,
+  maxReverse: 12,
+  steer: 1.9, // radians per second at full lock, scaled down with speed
+  grip: 8,
+  handbrakeGrip: 2.2,
+  length: 4.4,
+  width: 2.0,
+  maxHealth: 100,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const TRAFFIC = {
+  count: 12,
+  cruise: 11,
+  minGap: 7,
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+export const PEDS = {
+  count: 26,
+  walkSpeed: 1.6,
+  runSpeed: 5.2,
+  fleeRadius: 14,
+};
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const WANTED = {
+  maxStars: 5,
+  // police cars per star level (index = stars)
+  policeCars: [0, 1, 2, 3, 4, 5],
+  // seconds out of every police line of sight before one star drops
+  decaySeconds: [0, 14, 18, 24, 30, 38],
+  copSight: 70,
+  spawnRadius: 55,
+};
+
+export const CAMERA = {
+  footDistance: 9,
+  footHeight: 4.2,
+  carDistance: 11,
+  carHeight: 4.6,
+  smoothing: 7,
+  minPitch: 0.12,
+  maxPitch: 0.9,
+};
 
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  skyTop: 0x2f6fb4,
+  skyHorizon: 0xffd9a0,
+  sun: 0xffe3b3,
+  fog: 0xf2c98f,
+  asphalt: 0x33363d,
+  sidewalk: 0x9a938a,
+  sand: 0xe8cf9e,
+  water: 0x2e7f9e,
+  grass: 0x7fae62,
+  buildingA: 0xe8b48a,
+  buildingB: 0xd97b6c,
+  buildingC: 0x7fb3d5,
+  buildingD: 0xf2e3c6,
+  buildingE: 0x9db38a,
+  glass: 0x3d6f8e,
+  palmTrunk: 0x8a6a4a,
+  palmLeaf: 0x3f8f4f,
+  lamp: 0x2b2f36,
+  hudPanel: 'rgba(12, 16, 24, 0.72)',
+  hudText: '#f4f1e8',
+  hudAccent: '#ffb347',
+  star: '#ffd23f',
+  wantedRed: '#ff4d4d',
+  mission: '#4fc3f7',
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
