@@ -76,6 +76,13 @@ export function createMissions(city, random) {
     return { x: step.x, z: step.z };
   }
 
+  // Restore the story position after loading a save (or reset it for a new game):
+  // startMission() only sets the active mission, it never moves the index, so
+  // without this Continue would show mission N's card but start mission 1.
+  function setProgress(done) {
+    index = Math.max(0, Math.min(MISSIONS.length, done | 0));
+  }
+
   function startMission(i, events) {
     const mission = MISSIONS[i];
     active = { mission, stepIndex: 0, timeLeft: mission.steps[0].time ?? 0 };
@@ -195,5 +202,6 @@ export function createMissions(city, random) {
     startNext,
     retry,
     startMission,
+    setProgress,
   };
 }

@@ -283,6 +283,7 @@ function setScreen(next) {
 function startNewGame() {
   cash = 120;
   saveGame();
+  missions.setProgress(0);
   player.health = PLAYER.maxHealth;
   player.ammo = PLAYER.pistolMag;
   player.reserveAmmo = 48;
@@ -299,6 +300,7 @@ function startNewGame() {
 function continueGame() {
   if (!saveData) return;
   cash = saveData.cash ?? 120;
+  missions.setProgress(saveData.missionsDone ?? 0);
   player.health = PLAYER.maxHealth;
   player.ammo = PLAYER.pistolMag;
   player.reserveAmmo = 48;
