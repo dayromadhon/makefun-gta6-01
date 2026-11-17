@@ -1,144 +1,87 @@
-// The screenshot scenes behind ?shot=cover|street|chase|mission. Each one plays the real
-// game forward from a fresh world for a fixed number of steps, steered by a simple
-// autopilot, so the frame is what a short stretch of real play looks like and the same
-// seed always gives the same frame. The HUD stays on: the screenshots must show it.
+// Solmar Heat — screenshot scenes.
+// One job: when the page opens with ?shot=<name>, stage the real game into
+// a photogenic state (a chase, a street walk, a mission run) and tell the
+// screenshot tool when the frame is ready. Nothing here fakes a render:
+// every scene is the live game, positioned and given a wanted level.
 
-import { STEP } from './config.js';
+import { PLACES } from './config.js';
 
-const SCENES = {
-  cover: { seconds: 4, wanted: 2, police: 2 },
-  street: { seconds: 4, wanted: 0, police: 0 },
-  chase: { seconds: 5, wanted: 4, police: 3 },
-  mission: { seconds: 4, wanted: 1, police: 1 },
-};
-
-function fakeDriveInput(steer) {
-  return {
-    axes() {
-      return { forward: 1, strafe: steer };
-    },
-    handbrake() {
-      return false;
-    },
-    takeActions() {
-      return 0;
-    },
-    takeLook() {
-      return { dx: 0, dy: 0, wheel: 0 };
-    },
+export function applyShot(G, name) {
+  const { player, vehicles, peds, wanted, missions, hud } = G;
+  // photo mode: the live game still simulates, but a staged scene must
+  // never end in a fail state (busted / taken down) mid-shoot
+  G.shotMode = true;
+  const putInCar = (x, z, heading, speed) => {
+    const car = vehicles.parked.find((c) => !c.missionId) || vehicles.parked[0];
+    if (!car) return null;
+    vehicles.setPlayerCar(car);
+    car.x = x;
+    car.z = z;
+    car.heading = heading;
+    car.speed = speed;
+    player.x = x;
+    player.z = z;
+    player.heading = heading;
+    player.yaw = heading;
+    // actually sit Leo in the car (enterCar's state, without its sound:
+    // shots stage before the audio context exists)
+    player.inCar = true;
+    player.car = car;
+    player.mesh.visible = false;
+    return car;
   };
-}
 
-function fakeFootInput() {
-  return {
-    axes() {
-      return { forward: 0, strafe: 0 };
-    },
-    running() {
-      return false;
-    },
-    handbrake() {
-      return false;
-    },
-    takeActions() {
-      return 0;
-    },
-    takeLook() {
-      return { dx: 0, dy: 0, wheel: 0 };
-    },
-  };
-}
-
-// Steer the player's car to stay in the right-hand lane of the avenue (x = street),
-// heading south (+Z).
-function laneSteer(car, street) {
-  const err = car.x - (street - 3.5);
-  const headingErr = Math.sin(car.heading);
-  return Math.max(-1, Math.min(1, -err * 0.06 - headingErr * 0.8));
-}
-
-export function stageShot(name, world) {
-  const scene = SCENES[name] || SCENES.cover;
-  world.resetShot();
-  const { player, vehicles, peds, wanted, missions, city } = world;
-
-  if (name === 'street') {
-    // Leo on the sidewalk beside the avenue, looking south down the street: the
-    // crosswalk stripes right under a low camera stretch ugly, the sidewalk does not.
-    player.x = 12;
-    player.z = -30;
-    player.heading = 0;
-    player.syncMesh();
-    world.camera.snap({ x: player.x, y: 0, z: player.z }, player.heading);
+  if (name === 'cover') {
+    // Leo in a car at the downtown crosswalk, two stars, a police car
+    // pulling alongside, HUD and minimap live.
+    putInCar(0, -14, 0, 0);
+    const cop = vehicles.spawnPolice(5, -10);
+    if (cop) {
+      cop.heading = 0;
+      cop.speed = 2;
+    }
+    wanted.stars = 2;
+    missions.index = 0;
+    missions.startNext(G);
+    hud.toast('First Wheels — steal the marked sedan');
+  } else if (name === 'street') {
+    // Leo on foot in the middle of the crosswalk, pedestrians passing,
+    // towers behind. (Palms stand at (±6, 40) — keep clear of them.)
+    player.x = 0;
+    player.z = 40;
+    player.heading = Math.PI;
+    player.yaw = Math.PI;
+    wanted.stars = 0;
+    missions.index = 0;
+    missions.startNext(G);
+  } else if (name === 'chase') {
+    // Mid-ram: a police interceptor on Leo's flank, four stars.
+    const car = putInCar(-6, 0, Math.PI / 2, 16);
+    const cop = vehicles.spawnPolice(-12, 1.5);
+    if (cop) {
+      cop.heading = Math.PI / 2;
+      cop.speed = 20;
+    }
+    const cop2 = vehicles.spawnPolice(4, -8);
+    if (cop2) {
+      cop2.heading = Math.PI / 2;
+      cop2.speed = 18;
+    }
+    wanted.stars = 4;
+    missions.index = 0;
+    missions.startNext(G);
+    hud.toast('Wanted level 4 — the whole city is after you!');
+    void car;
   } else if (name === 'mission') {
-    missions.startMission(1, world.events);
-    const car = vehicles.spawnParkedCar(84, -120, 0);
-    player.enterCar(car, world.events);
-    car.speed = 18;
-    wanted.addStars(1, world.events);
-    world.spawnPolice(1);
-  } else {
-    const street = name === 'chase' ? -84 : 0;
-    const startZ = name === 'chase' ? -60 : -90;
-    const car = vehicles.spawnParkedCar(street, startZ, 0);
-    player.enterCar(car, world.events);
-    car.speed = name === 'chase' ? 26 : 22;
-    wanted.addStars(scene.wanted, world.events);
-    world.spawnPolice(scene.police);
-    // A couple of traffic cars ahead on the same avenue.
-    for (let i = 0; i < 3; i += 1) {
-      const t = vehicles.spawnTrafficCar();
-      t.x = street + (i % 2 === 0 ? -3.5 : 3.5);
-      t.z = startZ + 60 + i * 26;
-      t.heading = 0;
-    }
+    // Package Run: driving east to the marina, beacon and objective bar live.
+    putInCar(76, 20, Math.PI / 2, 15);
+    missions.index = 1;
+    missions.startNext(G);
+    // stay on the pickup leg so the beacon sits on the marina dock ahead
+    wanted.stars = 0;
+    hud.toast('Package Run — pick up the package at the Marina Dock');
   }
-
-  const steps = Math.floor(scene.seconds / STEP);
-  for (let i = 0; i < steps; i += 1) {
-    if (player.car) {
-      const street = name === 'chase' ? -84 : name === 'mission' ? 84 : 0;
-      vehicles.drivePlayer(player.car, fakeDriveInput(laneSteer(player.car, street)), STEP, city);
-      // drivePlayer moves only the car — keep the player on top of it, exactly like
-      // player.update does in real play, so the camera, police and missions track it.
-      player.x = player.car.x;
-      player.z = player.car.z;
-      player.heading = player.car.heading;
-      if (player.car.health <= 0) break;
-    } else {
-      player.update(STEP, fakeFootInput(), world, world.events);
-    }
-    vehicles.update(STEP, player, city, world.events);
-    peds.update(STEP, player, city);
-    world.updatePolice(STEP);
-    world.camera.update(STEP, { x: player.x, y: 0, z: player.z }, player.car ? player.car.heading : player.heading, !!player.car);
-    world.effects.update(STEP);
-  }
-  if (name === 'chase' && player.car) {
-    // The chase camera sits behind Leo's car, so a pursuit from dead behind is
-    // invisible — pull the nearest police car up alongside him, mid-ram.
-    let nearest = null;
-    let nearestDist = Infinity;
-    for (const car of vehicles.cars) {
-      if (car.driver !== 'police') continue;
-      const d = Math.hypot(car.x - player.x, car.z - player.z);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearest = car;
-      }
-    }
-    if (nearest) {
-      nearest.x = player.car.x + 5.5;
-      nearest.z = player.car.z + 3;
-      nearest.heading = player.car.heading;
-      nearest.speed = player.car.speed;
-      vehicles.syncMesh(nearest);
-    }
-  }
-  // Snap the camera to the final frame: the smoothed chase cam lags a fast car by
-  // metres, which shrinks it in a still. In real play the lag is the speed feel.
-  if (player.car) {
-    world.camera.snap({ x: player.x, y: 0, z: player.z }, player.car.heading);
-  }
-  return { screen: 'play', best: 0 };
+  void PLACES;
+  // how many rendered frames before the screenshot tool may shoot
+  return 100;
 }

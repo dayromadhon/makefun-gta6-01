@@ -1,108 +1,83 @@
-// Keyboard and mouse state. The game reads held keys every frame and consumes one-shot
-// actions (confirm, pause, enter car, punch, shoot, reload, horn) through takeActions().
-// Pointer drag orbits the camera; the wheel zooms it.
-
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-export const ACTION_ENTER = 4;
-export const ACTION_PUNCH = 8;
-export const ACTION_SHOOT = 16;
-export const ACTION_RELOAD = 32;
-export const ACTION_HORN = 64;
-export const ACTION_MUTE = 128;
-
-const KEY_ACTIONS = {
-  Enter: ACTION_CONFIRM,
-  Space: ACTION_CONFIRM,
-  KeyP: ACTION_PAUSE,
-  Escape: ACTION_PAUSE,
-  KeyE: ACTION_ENTER,
-  KeyF: ACTION_PUNCH,
-  KeyR: ACTION_RELOAD,
-  KeyH: ACTION_HORN,
-  KeyM: ACTION_MUTE,
-};
+// Solmar Heat — keyboard and mouse state.
+// One job: turn DOM events into a plain object the game reads every frame.
 
 export function createInput(canvas) {
-  const held = new Set();
-  const queue = [];
-  let dragDX = 0;
-  let dragDY = 0;
-  let wheel = 0;
-  let dragging = false;
+  const keys = new Set();
+  const state = {
+    keys,
+    // one-shot actions: set true on the keydown, cleared by the game after
+    // it has consumed them exactly once (so a press never fires twice).
+    pressed: new Set(),
+    mouseDown: false,
+    mouseButton: -1,
+    dragDX: 0,
+    dragDY: 0,
+    dragging: false,
+    pointerLocked: false,
+  };
   let lastX = 0;
   let lastY = 0;
 
-  function press(action) {
-    if (!queue.includes(action)) queue.push(action);
-  }
-
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) return;
-    held.add(event.code);
-    const action = KEY_ACTIONS[event.code];
-    if (action !== undefined) {
-      press(action);
-      if (event.code === 'Space') event.preventDefault();
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    keys.add(e.code);
+    state.pressed.add(e.code);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
+      e.preventDefault();
     }
   });
-  window.addEventListener('keyup', (event) => held.delete(event.code));
-  window.addEventListener('blur', () => held.clear());
-
-  canvas.addEventListener('mousedown', (event) => {
-    if (event.button === 0) press(ACTION_SHOOT);
-    if (event.button === 2) {
-      dragging = true;
-      lastX = event.clientX;
-      lastY = event.clientY;
-    }
+  window.addEventListener('keyup', (e) => keys.delete(e.code));
+  window.addEventListener('blur', () => {
+    keys.clear();
+    state.pressed.clear();
+    state.mouseDown = false;
+    state.dragging = false;
   });
-  canvas.addEventListener('mousemove', (event) => {
-    if (!dragging) return;
-    dragDX += event.clientX - lastX;
-    dragDY += event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
+
+  canvas.addEventListener('mousedown', (e) => {
+    state.mouseDown = true;
+    state.mouseButton = e.button;
+    state.dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
   });
   window.addEventListener('mouseup', () => {
-    dragging = false;
+    state.mouseDown = false;
+    state.dragging = false;
+    state.mouseButton = -1;
   });
-  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
-  canvas.addEventListener('wheel', (event) => {
-    wheel += Math.sign(event.deltaY);
-    event.preventDefault();
-  }, { passive: false });
+  window.addEventListener('mousemove', (e) => {
+    if (!state.dragging) return;
+    state.dragDX += e.clientX - lastX;
+    state.dragDY += e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+  });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // Driving / walking axes, -1..1, relative to the camera.
-  function axes() {
-    let forward = 0;
-    let strafe = 0;
-    if (held.has('KeyW') || held.has('ArrowUp')) forward += 1;
-    if (held.has('KeyS') || held.has('ArrowDown')) forward -= 1;
-    if (held.has('KeyA') || held.has('ArrowLeft')) strafe -= 1;
-    if (held.has('KeyD') || held.has('ArrowRight')) strafe += 1;
-    return { forward, strafe };
-  }
-
-  return {
-    axes,
-    running() {
-      return held.has('ShiftLeft') || held.has('ShiftRight');
-    },
-    handbrake() {
-      return held.has('Space');
-    },
-    takeActions() {
-      let bits = 0;
-      while (queue.length > 0) bits |= queue.shift();
-      return bits;
-    },
-    takeLook() {
-      const look = { dx: dragDX, dy: dragDY, wheel };
-      dragDX = 0;
-      dragDY = 0;
-      wheel = 0;
-      return look;
-    },
+  state.down = (code) => keys.has(code);
+  state.wasPressed = (code) => state.pressed.has(code);
+  // Call once per frame after the game has read the presses.
+  state.endFrame = () => {
+    state.pressed.clear();
+    state.dragDX = 0;
+    state.dragDY = 0;
   };
+  // Movement axes from WASD + arrows, in camera space: forward is -z of the
+  // camera yaw, right is +x of it.
+  state.moveAxis = () => {
+    let x = 0;
+    let y = 0;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
+    const len = Math.hypot(x, y);
+    if (len > 1) {
+      x /= len;
+      y /= len;
+    }
+    return { x, y };
+  };
+  return state;
 }

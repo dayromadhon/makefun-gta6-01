@@ -1,66 +1,73 @@
-// The third-person chase camera: it trails behind Leo or his car, swings around with a
-// mouse drag, zooms with the wheel, and eases back behind the direction of travel.
-
-import * as THREE from 'three';
-import { CAMERA } from './config.js';
+// Solmar Heat — the chase camera.
+// One job: put the camera behind the player or the car, smoothly, and let
+// a right-drag orbit it. Forward is (sin(yaw), cos(yaw)) in (x, z).
 
 export function createCamera(camera) {
-  let yaw = 0;
-  let pitch = 0.32;
-  let distance = CAMERA.carDistance;
-  let zoom = 0;
-  let autoYaw = true;
-  let position = new THREE.Vector3(0, 8, -12);
-
-  function look(dx, dy, wheel) {
-    yaw -= dx * 0.005;
-    pitch += dy * 0.003;
-    pitch = Math.max(CAMERA.minPitch, Math.min(CAMERA.maxPitch, pitch));
-    if (wheel !== 0) {
-      zoom = Math.max(-5, Math.min(7, zoom + wheel * 1.2));
-    }
-    if (dx !== 0 || dy !== 0) autoYaw = false;
-  }
-
-  function update(dt, focus, heading, inCar) {
-    const wantDistance = (inCar ? CAMERA.carDistance : CAMERA.footDistance) + zoom;
-    distance += (wantDistance - distance) * Math.min(1, dt * 4);
-    const wantHeight = inCar ? CAMERA.carHeight : CAMERA.footHeight;
-    if (autoYaw) {
-      let diff = heading - yaw;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      yaw += diff * Math.min(1, dt * (inCar ? 2.2 : 3.2));
-    }
-    const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const desired = new THREE.Vector3(
-      focus.x + back.x * distance,
-      focus.y + wantHeight * (0.6 + pitch),
-      focus.z + back.z * distance,
-    );
-    position.lerp(desired, Math.min(1, dt * CAMERA.smoothing));
-    camera.position.copy(position);
-    camera.lookAt(focus.x, focus.y + 1.4, focus.z);
-  }
-
-  function snap(focus, heading) {
-    yaw = heading;
-    autoYaw = true;
-    const back = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    position.set(focus.x + back.x * distance, focus.y + 4, focus.z + back.z * distance);
-    camera.position.copy(position);
-    camera.lookAt(focus.x, focus.y + 1.4, focus.z);
-  }
-
-  return {
-    get yaw() {
-      return yaw;
-    },
-    look,
-    update,
-    snap,
-    recenter() {
-      autoYaw = true;
-    },
+  const cam = {
+    yaw: 0, // follows the player's heading when free
+    orbit: 0, // extra yaw from dragging, decays back to 0
+    pitch: 0.32, // radians above the horizon
+    dist: 11,
+    height: 5,
+    shake: 0,
+    shakeX: 0,
+    shakeY: 0,
   };
+
+  function update(dt, ctx) {
+    const player = ctx.player;
+    const input = ctx.input;
+    // right-drag orbits (left click is shoot)
+    if (input.dragging && input.mouseButton === 2) {
+      cam.orbit -= input.dragDX * 0.005;
+      cam.pitch = Math.max(0.1, Math.min(1.0, cam.pitch + input.dragDY * 0.003));
+    } else {
+      // ease the orbit back so the camera settles behind the player
+      cam.orbit *= Math.max(0, 1 - 1.2 * dt);
+    }
+    // the yaw to follow: the car's heading when driving, the player's
+    // movement heading on foot, plus any orbit offset
+    let targetYaw;
+    if (player.inCar && player.car) {
+      targetYaw = player.car.heading;
+      cam.dist += ((13 - cam.dist) * Math.min(1, 3 * dt));
+      cam.height += ((6.5 - cam.height) * Math.min(1, 3 * dt));
+    } else {
+      targetYaw = player.heading;
+      cam.dist += ((10 - cam.dist) * Math.min(1, 3 * dt));
+      cam.height += ((5 - cam.height) * Math.min(1, 3 * dt));
+    }
+    let diff = targetYaw + cam.orbit - cam.yaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    cam.yaw += diff * Math.min(1, 4 * dt);
+    player.yaw = cam.yaw;
+
+    const fx = Math.sin(cam.yaw);
+    const fz = Math.cos(cam.yaw);
+    const tx = player.x;
+    const tz = player.z;
+    const back = cam.dist * Math.cos(cam.pitch);
+    const up = cam.dist * Math.sin(cam.pitch) + cam.height * 0.4;
+    camera.position.set(tx - fx * back, up, tz - fz * back);
+    if (cam.shake > 0.01) {
+      cam.shakeX = (Math.random() - 0.5) * cam.shake;
+      cam.shakeY = (Math.random() - 0.5) * cam.shake;
+      cam.shake *= Math.max(0, 1 - 4 * dt);
+    } else {
+      cam.shakeX = 0;
+      cam.shakeY = 0;
+    }
+    camera.position.x += cam.shakeX;
+    camera.position.y += cam.shakeY;
+    camera.lookAt(tx + fx * 4, 1.6, tz + fz * 4);
+  }
+
+  function addShake(amount) {
+    cam.shake = Math.min(1.2, cam.shake + amount);
+  }
+
+  cam.update = update;
+  cam.addShake = addShake;
+  return cam;
 }

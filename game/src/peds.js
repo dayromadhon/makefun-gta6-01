@@ -1,196 +1,261 @@
-// Pedestrians: box-built walkers on the sidewalks, with a little wander, panic when a
-// car bears down on them or a shot rings out, and cop pedestrians who chase the player
-// when the wanted level says so.
+// Solmar Heat — pedestrians and foot cops.
+// One job: the people on the sidewalks — walking, fleeing, getting knocked
+// down, and the cops who chase you on foot.
 
-import * as THREE from 'three';
-import { PEDS } from './config.js';
+import { WORLD, TUNE } from './config.js';
+import { mulberry32, range, pick } from './random.js';
 
-const SHIRT_COLORS = [0xe74c3c, 0x3498db, 0xf39c12, 0x9b59b6, 0x1abc9c, 0xecf0f1, 0x34495e, 0xe67e22, 0xfd79a8, 0x00cec9];
-const SKIN_COLORS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac];
+const THREE = window.THREE;
 
-function makePedMesh(shirt, skin, cop) {
-  const group = new THREE.Group();
-  const shirtMat = new THREE.MeshLambertMaterial({ color: cop ? 0x1c2f4a : shirt });
-  const skinMat = new THREE.MeshLambertMaterial({ color: skin });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: cop ? 0x141c26 : 0x2c3e50 });
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.8, 0.26), pantsMat);
-  legs.position.y = 0.4;
-  legs.castShadow = true;
-  group.add(legs);
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.62, 0.32), shirtMat);
-  torso.position.y = 1.11;
-  torso.castShadow = true;
-  group.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.32), skinMat);
-  head.position.y = 1.62;
-  head.castShadow = true;
-  group.add(head);
-  if (cop) {
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.1, 0.36), new THREE.MeshLambertMaterial({ color: 0x0e1622 }));
-    cap.position.y = 1.82;
-    group.add(cap);
-  } else {
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.34), new THREE.MeshLambertMaterial({ color: 0x2d1a0e }));
-    hair.position.y = 1.8;
-    group.add(hair);
+const SHIRTS = [0xd95f4b, 0x4b7fd9, 0x53b06a, 0xd9b44b, 0x8a5fd9, 0xe8e4da, 0x3a3f46];
+const SKINS = [0xe8b98a, 0xc98d64, 0x8a5f3d, 0xf0c8a0];
+
+function makePedMesh(shirt, skin) {
+  const g = new THREE.Group();
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), new THREE.MeshLambertMaterial({ color: shirt }));
+  torso.position.y = 1.05;
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshLambertMaterial({ color: skin }));
+  head.position.y = 1.75;
+  g.add(head);
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x2a2d33 });
+  for (const sx of [-0.18, 0.18]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.6, 0.24), legMat);
+    leg.position.set(sx, 0.3, 0);
+    g.add(leg);
   }
-  const armGeo = new THREE.BoxGeometry(0.13, 0.55, 0.13);
-  const leftArm = new THREE.Mesh(armGeo, shirtMat);
-  leftArm.position.set(-0.36, 1.1, 0);
-  group.add(leftArm);
-  const rightArm = new THREE.Mesh(armGeo, shirtMat);
-  rightArm.position.set(0.36, 1.1, 0);
-  group.add(rightArm);
-  group.userData.leftArm = leftArm;
-  group.userData.rightArm = rightArm;
-  return group;
+  return g;
 }
 
-export function createPeds(scene, city, random) {
-  const peds = [];
+function makeCopMesh() {
+  const g = makePedMesh(0x1d4fd7, 0xe8b98a);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.14, 10), new THREE.MeshLambertMaterial({ color: 0x14161a }));
+  cap.position.y = 1.95;
+  g.add(cap);
+  return g;
+}
+
+export function createPeds(scene, city, seed) {
+  const rng = mulberry32(seed);
   const group = new THREE.Group();
   scene.add(group);
+  const peds = [];
+  const cops = [];
 
-  function addPed(x, z, cop) {
-    const mesh = makePedMesh(random.pick(SHIRT_COLORS), random.pick(SKIN_COLORS), cop);
+  function randomSidewalkPoint() {
+    // on a sidewalk: just off a street line, inside the city
+    const along = pick(rng, WORLD.streets);
+    const cross = range(rng, -95, 95);
+    if (rng() < 0.5) return { x: along + 6.5, z: cross };
+    return { x: cross, z: along + 6.5 };
+  }
+
+  function spawnPed(x, z) {
+    const mesh = makePedMesh(pick(rng, SHIRTS), pick(rng, SKINS));
     mesh.position.set(x, 0, z);
     group.add(mesh);
     const ped = {
-      mesh,
-      x,
-      z,
-      heading: random.range(0, Math.PI * 2),
-      speed: 0,
-      target: null,
-      panic: 0,
-      cop: !!cop,
-      walkPhase: random.range(0, Math.PI * 2),
-      alive: true,
-      downTimer: 0,
+      mesh, x, z, heading: rng() * Math.PI * 2,
+      speed: range(rng, 1.6, 2.8), state: 'walk',
+      target: randomSidewalkPoint(), downTimer: 0, fleeFrom: null, isCop: false,
     };
     peds.push(ped);
     return ped;
   }
 
-  for (let i = 0; i < PEDS.count; i += 1) {
-    const point = city.randomSidewalkPoint();
-    addPed(point.x, point.z, false);
-  }
-
-  function newTarget(ped) {
-    ped.target = city.randomSidewalkPoint();
-  }
-
-  function scare(x, z, radius) {
-    for (const ped of peds) {
-      if (!ped.alive || ped.cop) continue;
-      const dist = Math.hypot(ped.x - x, ped.z - z);
-      if (dist < radius) {
-        ped.panic = 3 + Math.random() * 2;
-        const away = Math.atan2(ped.x - x, ped.z - z);
-        ped.target = { x: ped.x + Math.sin(away) * 30, z: ped.z + Math.cos(away) * 30 };
-      }
+  function spawnCop(x, z) {
+    let cop = cops.find((c) => !c.active);
+    if (!cop) {
+      if (cops.length >= 6) return null;
+      const mesh = makeCopMesh();
+      group.add(mesh);
+      cop = {
+        mesh, x, z, heading: 0, speed: TUNE.policeFootSpeed, state: 'chase',
+        target: null, downTimer: 0, fleeFrom: null, isCop: true, active: false,
+        touchTimer: 0,
+      };
+      cops.push(cop);
     }
+    cop.active = true;
+    cop.x = x;
+    cop.z = z;
+    cop.state = 'chase';
+    cop.touchTimer = 0;
+    cop.mesh.visible = true;
+    return cop;
   }
 
-  function update(dt, player, city) {
+  function releaseCop(cop) {
+    cop.active = false;
+    cop.mesh.visible = false;
+  }
+
+  function knockDown(ped, fromX, fromZ) {
+    if (ped.state === 'down') return;
+    ped.state = 'down';
+    ped.downTimer = 3.5;
+    ped.fleeFrom = { x: fromX, z: fromZ };
+    ped.mesh.rotation.x = Math.PI / 2 - 0.15;
+    ped.mesh.position.y = 0.3;
+  }
+
+  function update(dt, ctx) {
+    const px = ctx.player.x;
+    const pz = ctx.player.z;
+    // --- walkers ------------------------------------------------------------
     for (const ped of peds) {
-      if (!ped.alive) {
+      if (ped.state === 'down') {
         ped.downTimer -= dt;
         if (ped.downTimer <= 0) {
-          ped.alive = true;
-          ped.mesh.visible = true;
-          ped.mesh.rotation.z = 0;
+          ped.state = 'flee';
+          ped.mesh.rotation.x = 0;
           ped.mesh.position.y = 0;
-          ped.panic = 4;
         }
         continue;
       }
-      if (ped.cop && player) {
-        // Cop on foot: run the player down and punch.
-        const dx = player.x - ped.x;
-        const dz = player.z - ped.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 1.4) {
-          ped.speed = 0;
-          player.hurt(14 * dt, ped);
-        } else {
-          ped.heading = Math.atan2(dx, dz);
-          ped.speed = PEDS.runSpeed;
+      let tx;
+      let tz;
+      let speed = ped.speed;
+      if (ped.state === 'flee' && ped.fleeFrom) {
+        const dx = ped.x - ped.fleeFrom.x;
+        const dz = ped.z - ped.fleeFrom.z;
+        const d = Math.hypot(dx, dz) || 1;
+        tx = ped.x + (dx / d) * 20;
+        tz = ped.z + (dz / d) * 20;
+        speed = 5.2;
+        if (Math.hypot(tx - ped.x, tz - ped.z) > 30 || d > 26) {
+          ped.state = 'walk';
+          ped.target = randomSidewalkPoint();
         }
       } else {
-        if (ped.panic > 0) ped.panic -= dt;
-        if (!ped.target) newTarget(ped);
-        const dx = ped.target.x - ped.x;
-        const dz = ped.target.z - ped.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 1.5) {
-          newTarget(ped);
-        } else {
-          const wanted = Math.atan2(dx, dz);
-          let turn = wanted - ped.heading;
-          while (turn > Math.PI) turn -= Math.PI * 2;
-          while (turn < -Math.PI) turn += Math.PI * 2;
-          ped.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, turn));
-          ped.speed = ped.panic > 0 ? PEDS.runSpeed : PEDS.walkSpeed;
-        }
-        // Flee a fast car that is about to hit them.
-        if (player && player.car) {
-          const car = player.car;
-          const cdx = ped.x - car.x;
-          const cdz = ped.z - car.z;
-          const cdist = Math.hypot(cdx, cdz);
-          if (cdist < 8 && Math.abs(car.speed) > 6) {
-            ped.panic = 2;
-            ped.target = { x: ped.x + (cdx / cdist) * 20, z: ped.z + (cdz / cdist) * 20 };
+        tx = ped.target.x;
+        tz = ped.target.z;
+        if (Math.hypot(tx - ped.x, tz - ped.z) < 2) ped.target = randomSidewalkPoint();
+      }
+      const dx = tx - ped.x;
+      const dz = tz - ped.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.1) {
+        const want = Math.atan2(dx, dz);
+        let diff = want - ped.heading;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        ped.heading += Math.max(-3 * dt, Math.min(3 * dt, diff));
+        ped.x += Math.sin(ped.heading) * speed * dt;
+        ped.z += Math.cos(ped.heading) * speed * dt;
+        const res = city.resolveCircle(ped.x, ped.z, 0.6);
+        ped.x = res.x;
+        ped.z = res.z;
+        ped.mesh.position.set(ped.x, ped.state === 'down' ? 0.3 : 0, ped.z);
+        ped.mesh.rotation.y = ped.heading;
+        // walk bob
+        ped.mesh.position.y = ped.state === 'down' ? 0.3 : Math.abs(Math.sin(performance.now() * 0.008 + ped.x)) * 0.05;
+      }
+      // hit by a moving car?
+      if (ctx.vehicles) {
+        for (const car of ctx.vehicles.all) {
+          if (car.wrecked || car.isParked) continue;
+          if (Math.abs(car.speed) < 3) continue;
+          const cd = Math.hypot(car.x - ped.x, car.z - ped.z);
+          if (cd < 2.4) {
+            knockDown(ped, car.x, car.z);
+            // only the PLAYER's car makes it the player's crime: traffic
+            // cars run peds over on their own and must not raise Leo's stars
+            if (ctx.onCrime && car.isPlayer) ctx.onCrime('hit-ped', ped.x, ped.z);
+            if (ctx.effects) ctx.effects.sparks(ped.x, 1, ped.z, 5);
+            break;
           }
         }
       }
-      ped.x += Math.sin(ped.heading) * ped.speed * dt;
-      ped.z += Math.cos(ped.heading) * ped.speed * dt;
-      const clamped = city.clampToCity(ped.x, ped.z, 2);
-      ped.x = clamped.x;
-      ped.z = clamped.z;
-      ped.walkPhase += dt * ped.speed * 2.4;
-      ped.mesh.position.set(ped.x, 0, ped.z);
-      ped.mesh.rotation.y = ped.heading;
-      const swing = Math.sin(ped.walkPhase) * 0.5 * Math.min(1, ped.speed / 3);
-      ped.mesh.userData.leftArm.rotation.x = swing;
-      ped.mesh.userData.rightArm.rotation.x = -swing;
+    }
+    // --- foot cops ------------------------------------------------------------
+    for (const cop of cops) {
+      if (!cop.active) continue;
+      if (cop.state === 'down') {
+        cop.downTimer -= dt;
+        if (cop.downTimer <= 0) {
+          cop.state = 'chase';
+          cop.mesh.rotation.x = 0;
+          cop.mesh.position.y = 0;
+        }
+        continue;
+      }
+      const dx = px - cop.x;
+      const dz = pz - cop.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.1) {
+        const want = Math.atan2(dx, dz);
+        let diff = want - cop.heading;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        cop.heading += Math.max(-4 * dt, Math.min(4 * dt, diff));
+        const sp = ctx.player.inCar ? TUNE.policeFootSpeed * 0.9 : TUNE.policeFootSpeed;
+        cop.x += Math.sin(cop.heading) * sp * dt;
+        cop.z += Math.cos(cop.heading) * sp * dt;
+        const res = city.resolveCircle(cop.x, cop.z, 0.6);
+        cop.x = res.x;
+        cop.z = res.z;
+      }
+      cop.mesh.position.set(cop.x, 0, cop.z);
+      cop.mesh.rotation.y = cop.heading;
+      // bust: touching the player on foot while they are slow
+      // (not in photo mode)
+      if (!ctx.player.inCar && d < 2.4 && Math.abs(ctx.player.speed || 0) < 3 && !ctx.shotMode) {
+        cop.touchTimer += dt;
+        if (cop.touchTimer > TUNE.bustHoldSeconds && ctx.onBusted) ctx.onBusted();
+      } else {
+        cop.touchTimer = 0;
+      }
+      // a cop hit by a car goes down
+      if (ctx.vehicles) {
+        for (const car of ctx.vehicles.all) {
+          if (car.wrecked || car.isParked || car.isPolice) continue;
+          if (Math.abs(car.speed) < 3) continue;
+          if (Math.hypot(car.x - cop.x, car.z - cop.z) < 2.4) {
+            cop.state = 'down';
+            cop.downTimer = 4;
+            cop.mesh.rotation.x = Math.PI / 2 - 0.15;
+            cop.mesh.position.y = 0.3;
+            // same rule as peds: only the player's car is the player's crime
+            if (ctx.onCrime && car.isPlayer) ctx.onCrime('hit-cop', cop.x, cop.z);
+            break;
+          }
+        }
+      }
     }
   }
 
-  function knockDown(ped) {
-    if (!ped.alive) return;
-    ped.alive = false;
-    ped.downTimer = 6;
-    ped.mesh.rotation.z = Math.PI / 2;
-    ped.mesh.position.y = 0.25;
+  function spawnWalkers(count) {
+    for (let i = 0; i < count; i++) {
+      const p = randomSidewalkPoint();
+      spawnPed(p.x, p.z);
+    }
   }
 
-  function spawnCop(x, z) {
-    return addPed(x, z, true);
-  }
-
-  function removeCop(ped) {
-    const index = peds.indexOf(ped);
-    if (index !== -1) peds.splice(index, 1);
-    group.remove(ped.mesh);
-  }
-
-  function nearestPed(x, z, maxDist) {
-    let best = null;
-    let bestDist = maxDist;
+  function fleeAll(fromX, fromZ) {
     for (const ped of peds) {
-      if (!ped.alive) continue;
-      const dist = Math.hypot(ped.x - x, ped.z - z);
-      if (dist < bestDist) {
-        bestDist = dist;
+      if (ped.state === 'walk' && Math.hypot(ped.x - fromX, ped.z - fromZ) < 26) {
+        ped.state = 'flee';
+        ped.fleeFrom = { x: fromX, z: fromZ };
+      }
+    }
+  }
+
+  function nearest(x, z, maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const ped of peds) {
+      if (ped.state === 'down') continue;
+      const d = Math.hypot(ped.x - x, ped.z - z);
+      if (d < bestD) {
+        bestD = d;
         best = ped;
       }
     }
     return best;
   }
 
-  return { peds, update, scare, knockDown, spawnCop, removeCop, nearestPed, addPed };
+  return {
+    peds, cops, spawnWalkers, spawnCop, releaseCop, knockDown, update, fleeAll, nearest,
+  };
 }

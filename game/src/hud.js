@@ -1,237 +1,203 @@
-// The 2D layer: the HUD (stars, cash, health, ammo, speed, objective), the canvas
-// minimap, the menus (title, pause, busted, wasted, mission cards) and the toast line.
-// The 3D world never touches the DOM; main.js feeds this module a state snapshot.
+// Solmar Heat — the HUD, minimap and menus.
+// One job: everything drawn in DOM over the 3D view.
 
-import { CITY, PALETTE } from './config.js';
-
-const MAP_SIZE = 180;
-const WORLD = 560;
-
-function mapXY(x, z) {
-  return { x: ((x + WORLD / 2) / WORLD) * MAP_SIZE, y: ((z + WORLD / 2) / WORLD) * MAP_SIZE };
-}
+import { WORLD, DEBT_TOTAL } from './config.js';
 
 export function createHud() {
-  const el = (id) => document.getElementById(id);
-  const starsEl = el('stars');
-  const cashEl = el('cash');
-  const healthFill = el('health-fill');
-  const healthText = el('health-text');
-  const ammoEl = el('ammo');
-  const speedEl = el('speed');
-  const speedUnit = el('speed-unit');
-  const objectiveEl = el('objective-text');
-  const objectiveBox = el('objective');
-  const timerEl = el('timer');
-  const carEl = el('car-name');
-  const hintEl = el('hint');
-  const toastEl = el('toast');
-  const minimap = el('minimap');
-  const mapCtx = minimap.getContext('2d');
-  const vignette = el('vignette');
-  const menuTitle = el('menu-title');
-  const menuPause = el('menu-pause');
-  const menuEnd = el('menu-end');
-  const menuCard = el('menu-card');
-  const cardTitle = el('card-title');
-  const cardText = el('card-text');
-  const endTitle = el('end-title');
-  const endText = el('end-text');
-  const titleSave = el('title-save');
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    hud: $('hud'),
+    cash: $('cash'),
+    debt: $('debt'),
+    healthFill: $('health-fill'),
+    stars: $('stars'),
+    objective: $('objective'),
+    timer: $('timer'),
+    minimap: $('minimap'),
+    speed: $('speed'),
+    toast: $('toast'),
+    vignette: $('vignette'),
+    weapon: $('weapon'),
+    ammo: $('ammo'),
+    cardTitle: $('card-title'),
+    cardText: $('card-text'),
+    payout: $('payout'),
+  };
+  const mapCtx = el.minimap.getContext('2d');
   let toastTimer = null;
-  let lastStars = -1;
-  let lastCash = -1;
 
-  function setStars(n) {
-    if (n === lastStars) return;
-    lastStars = n;
-    let html = '';
-    for (let i = 0; i < 5; i += 1) {
-      html += `<span class="${i < n ? 'star on' : 'star'}">★</span>`;
+  const screens = {
+    title: $('screen-title'),
+    card: $('screen-card'),
+    pause: $('screen-pause'),
+    busted: $('screen-busted'),
+    down: $('screen-down'),
+  };
+
+  function showScreen(name) {
+    for (const [key, node] of Object.entries(screens)) {
+      if (node) node.style.display = key === name ? 'flex' : 'none';
     }
-    starsEl.innerHTML = html;
-    starsEl.classList.toggle('flash', n > 0);
+    el.hud.style.display = name === 'play' ? 'block' : 'none';
   }
 
-  function setCash(cash) {
-    if (cash === lastCash) return;
-    lastCash = cash;
-    cashEl.textContent = `$${cash.toLocaleString('en-US')}`;
+  function toast(text, ms) {
+    el.toast.textContent = text;
+    el.toast.style.opacity = '1';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      el.toast.style.opacity = '0';
+    }, ms || 3200);
   }
 
-  function toast(text, seconds = 3) {
-    toastEl.textContent = text;
-    toastEl.classList.add('show');
-    if (toastTimer) window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => toastEl.classList.remove('show'), seconds * 1000);
+  function showMissionCard(def) {
+    el.cardTitle.textContent = def.title;
+    el.cardText.textContent = def.briefing;
+    showScreen('card');
   }
 
-  function drawMinimap(player, police, traffic, marker) {
-    const ctx = mapCtx;
-    ctx.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
-    ctx.fillStyle = '#20242c';
-    ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE);
-    // Water south and east.
-    ctx.fillStyle = '#2e7f9e';
-    ctx.fillRect(0, mapXY(0, 224).y, MAP_SIZE, MAP_SIZE - mapXY(0, 224).y);
-    ctx.fillRect(mapXY(224, 0).x, 0, MAP_SIZE - mapXY(224, 0).x, MAP_SIZE);
-    // Roads.
-    ctx.strokeStyle = '#565b66';
-    ctx.lineWidth = 4;
-    for (const s of CITY.streets) {
-      const a = mapXY(s, 0);
-      const b = mapXY(0, s);
-      ctx.beginPath();
-      ctx.moveTo(a.x, 0);
-      ctx.lineTo(a.x, MAP_SIZE);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, b.y);
-      ctx.lineTo(MAP_SIZE, b.y);
-      ctx.stroke();
-    }
-    // Mission marker.
-    if (marker) {
-      const p = mapXY(marker.x, marker.z);
-      const pulse = 6 + Math.sin(performance.now() / 240) * 2;
-      ctx.fillStyle = '#4fc3f7';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    // Traffic dots.
-    ctx.fillStyle = '#e8e8e8';
-    for (const car of traffic) {
-      const p = mapXY(car.x, car.z);
-      ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
-    }
-    // Police dots.
-    for (const car of police) {
-      const p = mapXY(car.x, car.z);
-      ctx.fillStyle = Math.floor(performance.now() / 300) % 2 === 0 ? '#ff3b30' : '#2f7bff';
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Player arrow.
-    const pp = mapXY(player.x, player.z);
-    ctx.save();
-    ctx.translate(pp.x, pp.y);
-    ctx.rotate(Math.PI - player.heading);
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(0, -7);
-    ctx.lineTo(5, 6);
-    ctx.lineTo(-5, 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
+  function showPayout(amount, title) {
+    el.payout.textContent = `+$${amount} — ${title}`;
+    el.payout.style.opacity = '1';
+    setTimeout(() => {
+      el.payout.style.opacity = '0';
+    }, 3200);
   }
 
-  function update(state) {
-    setStars(state.stars);
-    setCash(state.cash);
-    const healthPct = Math.max(0, Math.round((state.health / state.maxHealth) * 100));
-    healthFill.style.width = `${healthPct}%`;
-    healthFill.style.background = healthPct > 50 ? '#4caf50' : healthPct > 25 ? '#ff9800' : '#f44336';
-    healthText.textContent = `${healthPct}`;
-    ammoEl.textContent = state.inCar ? '' : `◈ ${state.ammo} / ${state.reserveAmmo}`;
-    if (state.inCar) {
-      const kmh = Math.round(Math.abs(state.speed) * 3.6);
-      speedEl.textContent = String(kmh);
-      speedUnit.textContent = 'km/h';
-      carEl.textContent = state.carName;
+  function flashDamage() {
+    el.vignette.style.opacity = '0.85';
+    setTimeout(() => {
+      el.vignette.style.opacity = '0';
+    }, 220);
+  }
+
+  // Minimap: city bounds -140..140 mapped onto the 190px canvas.
+  function drawMinimap(G) {
+    const S = 190;
+    const W = 280; // world span shown
+    const toMap = (x, z) => [(x + W / 2) / W * S, (z + W / 2) / W * S];
+    mapCtx.fillStyle = '#10141a';
+    mapCtx.fillRect(0, 0, S, S);
+    // sea + sand
+    mapCtx.fillStyle = '#2e7fa8';
+    mapCtx.fillRect(0, 0, S, ((W / 2 - 132) / W) * S);
+    mapCtx.fillStyle = '#e6d29a';
+    mapCtx.fillRect(0, ((W / 2 - 132) / W) * S, S, ((132 - 100) / W) * S);
+    // blocks
+    mapCtx.fillStyle = '#2c313a';
+    for (const bx of [-60, -20, 20, 60]) {
+      for (const bz of [-60, -20, 20, 60]) {
+        const [x, y] = toMap(bx - 15, bz - 15);
+        mapCtx.fillRect(x, y, (30 / W) * S, (30 / W) * S);
+      }
+    }
+    // roads
+    mapCtx.strokeStyle = '#565d68';
+    mapCtx.lineWidth = 4;
+    for (const s of WORLD.streets) {
+      const [x1] = toMap(s, -100);
+      const [, y1] = toMap(-100, s);
+      mapCtx.beginPath();
+      mapCtx.moveTo(x1, 0);
+      mapCtx.lineTo(x1, S);
+      mapCtx.stroke();
+      mapCtx.beginPath();
+      mapCtx.moveTo(0, y1);
+      mapCtx.lineTo(S, y1);
+      mapCtx.stroke();
+    }
+    // mission / side-job target
+    let target = null;
+    if (G.missions.active) target = G.missions.stepTarget();
+    else if (G.missions.sideJob) {
+      const j = G.missions.sideJob;
+      target = j.phase === 'pickup' ? j.pickup : j.drop;
+    }
+    if (target) {
+      const [tx, ty] = toMap(target.x, target.z);
+      const pulse = 5 + Math.sin(performance.now() * 0.008) * 2;
+      mapCtx.fillStyle = '#ffd23e';
+      mapCtx.beginPath();
+      mapCtx.arc(tx, ty, pulse, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+    // police cars
+    mapCtx.fillStyle = '#ff4444';
+    for (const car of G.vehicles.police) {
+      if (!car.active) continue;
+      const [x, y] = toMap(car.x, car.z);
+      mapCtx.fillRect(x - 2, y - 2, 4, 4);
+    }
+    // foot cops
+    for (const cop of G.peds.cops) {
+      if (!cop.active) continue;
+      const [x, y] = toMap(cop.x, cop.z);
+      mapCtx.fillStyle = '#ff8844';
+      mapCtx.fillRect(x - 2, y - 2, 4, 4);
+    }
+    // player arrow
+    const [px, py] = toMap(G.player.x, G.player.z);
+    const heading = G.player.inCar && G.player.car ? G.player.car.heading : G.player.heading;
+    mapCtx.save();
+    mapCtx.translate(px, py);
+    mapCtx.rotate(Math.atan2(Math.sin(heading), -Math.cos(heading)) + Math.PI);
+    mapCtx.fillStyle = '#ffffff';
+    mapCtx.beginPath();
+    mapCtx.moveTo(0, -6);
+    mapCtx.lineTo(4, 5);
+    mapCtx.lineTo(-4, 5);
+    mapCtx.closePath();
+    mapCtx.fill();
+    mapCtx.restore();
+  }
+
+  function update(G) {
+    el.cash.textContent = `$${G.missions.cash}`;
+    const paid = Math.min(DEBT_TOTAL, G.missions.cash);
+    el.debt.textContent = `Debt $${DEBT_TOTAL - paid} left`;
+    el.healthFill.style.width = `${Math.max(0, G.player.health)}%`;
+    el.healthFill.style.background = G.player.health > 50 ? '#3fae6a' : G.player.health > 25 ? '#e0a92e' : '#c23b2e';
+    let stars = '';
+    for (let i = 0; i < 5; i++) stars += i < G.wanted.stars ? '★' : '☆';
+    el.stars.textContent = stars;
+    el.stars.style.color = G.wanted.stars > 0 ? '#ffd23e' : '#5a6270';
+    const m = G.missions.active;
+    if (m) {
+      el.objective.textContent = `${m.def.title} — ${G.missions.stepText()}`;
+      const s = G.missions.step();
+      if (s && s.timed && m.timer > 0) {
+        el.timer.textContent = `${Math.ceil(m.timer)}s`;
+        el.timer.style.display = 'block';
+      } else {
+        el.timer.style.display = 'none';
+      }
+    } else if (G.missions.sideJob) {
+      const j = G.missions.sideJob;
+      el.objective.textContent = `${j.kind === 'taxi' ? 'Taxi fare' : 'Courier run'} $${j.fare} — ${j.phase === 'pickup' ? 'pick up' : 'deliver'}`;
+      el.timer.style.display = 'none';
+    } else if (G.missions.index >= 5) {
+      el.objective.textContent = 'Free roam — side jobs pay the rest';
+      el.timer.style.display = 'none';
     } else {
-      speedEl.textContent = '';
-      speedUnit.textContent = '';
-      carEl.textContent = '';
+      el.objective.textContent = '';
+      el.timer.style.display = 'none';
     }
-    objectiveEl.textContent = state.objective || '';
-    objectiveBox.style.visibility = state.objective ? 'visible' : 'hidden';
-    if (state.timeLeft > 0 && state.timeLimit > 0) {
-      timerEl.textContent = `${Math.ceil(state.timeLeft)}s`;
-      timerEl.classList.toggle('urgent', state.timeLeft < 15);
+    if (G.player.inCar && G.player.car) {
+      el.speed.textContent = `${Math.round(Math.abs(G.player.car.speed) * 3.6)} km/h`;
+      el.speed.style.display = 'block';
     } else {
-      timerEl.textContent = '';
+      el.speed.style.display = 'none';
     }
-    hintEl.textContent = state.hint || '';
-    vignette.style.opacity = state.health < 35 ? String(0.55 - state.health / 100) : '0';
-  }
-
-  function showOnly(which) {
-    for (const [name, node] of [['title', menuTitle], ['pause', menuPause], ['end', menuEnd], ['card', menuCard]]) {
-      node.classList.toggle('hidden', name !== which);
-    }
-    const hud = document.getElementById('hud');
-    hud.classList.toggle('hidden', which === 'title');
-  }
-
-  function showTitle(save) {
-    showOnly('title');
-    if (save && save.cash > 0) {
-      titleSave.textContent = `Continue — $${save.cash.toLocaleString('en-US')} · ${save.missionsDone} of 5 jobs done`;
-      titleSave.classList.remove('hidden');
-    } else {
-      titleSave.classList.add('hidden');
-    }
-  }
-
-  function showPause() {
-    showOnly('pause');
-  }
-
-  function showEnd(kind, text) {
-    endTitle.textContent = kind === 'busted' ? 'BUSTED' : 'WASTED';
-    endTitle.style.color = kind === 'busted' ? '#4fc3f7' : '#ff4d4d';
-    endText.textContent = text;
-    showOnly('end');
-  }
-
-  function showCard(mission, onDone) {
-    cardTitle.textContent = mission.title;
-    cardText.textContent = mission.briefing;
-    showOnly('card');
-    const button = document.getElementById('card-go');
-    button.onclick = () => {
-      onDone();
-    };
-  }
-
-  function hideMenus() {
-    showOnly(null);
-  }
-
-  function bindButtons(handlers) {
-    const bind = (id, fn) => {
-      const node = document.getElementById(id);
-      if (node) node.addEventListener('click', fn);
-    };
-    bind('btn-new', () => handlers.onNewGame());
-    bind('btn-continue', () => handlers.onContinue());
-    bind('btn-resume', () => handlers.onResume());
-    bind('btn-restart-mission', () => handlers.onRestartMission());
-    bind('btn-quit-title', () => handlers.onQuitToTitle());
-    bind('btn-end-retry', () => handlers.onRetry());
-    bind('btn-end-title', () => handlers.onQuitToTitle());
-    bind('btn-mute', () => handlers.onMute());
+    el.weapon.textContent = G.player.weapon === 'pistol' ? 'PISTOL' : 'FISTS';
+    el.ammo.textContent = G.player.weapon === 'pistol' ? `${G.player.mag} / ${G.player.reserve}` : '—';
+    drawMinimap(G);
   }
 
   return {
-    update,
-    drawMinimap,
-    toast,
-    showTitle,
-    showPause,
-    showEnd,
-    showCard,
-    hideMenus,
-    bindButtons,
-    setMuteLabel(muted) {
-      const node = document.getElementById('btn-mute');
-      if (node) node.textContent = muted ? 'Unmute (M)' : 'Mute (M)';
+    el, showScreen, toast, showMissionCard, showPayout, flashDamage, update,
+    onClick(id, fn) {
+      const node = $(id);
+      if (node) node.addEventListener('click', () => fn());
     },
   };
 }

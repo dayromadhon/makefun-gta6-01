@@ -1,285 +1,252 @@
-// Leo Marín on foot and behind the wheel: walking, running, jumping, punching and
-// shooting, stealing cars, and taking damage. Driving itself lives in vehicles.js; this
-// module decides when Leo is in a car and what he does on foot.
+// Solmar Heat — Leo Marin on foot: walking, stealing cars, fighting.
+// One job: the player character when they are not behind a wheel.
 
-import * as THREE from 'three';
-import { PLAYER } from './config.js';
+import { TUNE } from './config.js';
 
-function makeLeoMesh() {
-  const group = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x0e7490 });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xc68642 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x1f2937 });
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.82, 0.28), pants);
-  legs.position.y = 0.41;
-  legs.castShadow = true;
-  group.add(legs);
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.64, 0.34), jacket);
-  torso.position.y = 1.14;
-  torso.castShadow = true;
-  group.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.34), skin);
-  head.position.y = 1.66;
-  head.castShadow = true;
-  group.add(head);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.38), new THREE.MeshLambertMaterial({ color: 0xf59e0b }));
-  cap.position.y = 1.86;
-  group.add(cap);
-  const armGeo = new THREE.BoxGeometry(0.14, 0.58, 0.14);
-  const leftArm = new THREE.Mesh(armGeo, jacket);
-  leftArm.position.set(-0.38, 1.12, 0);
-  group.add(leftArm);
-  const rightArm = new THREE.Mesh(armGeo, jacket);
-  rightArm.position.set(0.38, 1.12, 0);
-  group.add(rightArm);
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.42), new THREE.MeshLambertMaterial({ color: 0x111111 }));
-  gun.position.set(0.38, 0.86, 0.22);
-  group.add(gun);
-  group.userData.leftArm = leftArm;
-  group.userData.rightArm = rightArm;
-  group.userData.gun = gun;
-  return group;
+const THREE = window.THREE;
+
+function makePlayerMesh() {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6fc2 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.95, 0.42), jacket);
+  torso.position.y = 1.05;
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe8b98a }));
+  head.position.y = 1.78;
+  g.add(head);
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x22242a });
+  for (const sx of [-0.19, 0.19]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.62, 0.26), legMat);
+    leg.position.set(sx, 0.31, 0);
+    g.add(leg);
+  }
+  // a pistol in the right hand when armed
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.5), new THREE.MeshLambertMaterial({ color: 0x14161a }));
+  gun.position.set(0.48, 1.05, 0.25);
+  gun.name = 'gun';
+  g.add(gun);
+  return g;
 }
 
-export function createPlayer(scene, x, z) {
-  const mesh = makeLeoMesh();
-  mesh.position.set(x, 0, z);
+// Heading convention everywhere: forward = (sin(a), cos(a)) in (x, z).
+// So W with camera yaw Y walks along (sin Y, cos Y), and D strafes right
+// along (-cos Y, sin Y).
+
+export function createPlayer(scene, spawn) {
+  const mesh = makePlayerMesh();
   scene.add(mesh);
   const player = {
     mesh,
-    x,
-    z,
-    heading: 0,
-    vx: 0,
-    vz: 0,
-    vy: 0,
-    y: 0,
-    health: PLAYER.maxHealth,
-    ammo: PLAYER.pistolMag,
-    reserveAmmo: 48,
-    reloading: 0,
-    punchTimer: 0,
-    shootTimer: 0,
-    hurtTimer: 0,
+    x: spawn.x,
+    z: spawn.z,
+    heading: 0, // body facing
+    yaw: 0, // camera yaw the player moves relative to
+    speed: 0,
+    health: TUNE.playerHealth,
+    inCar: false,
     car: null,
-    walkPhase: 0,
-    dead: false,
+    weapon: 'pistol',
+    mag: TUNE.pistolMag,
+    reserve: 96,
+    reloading: 0,
+    punchCooldown: 0,
+    shootCooldown: 0,
+    down: false,
   };
 
-  function syncMesh() {
-    mesh.visible = player.car === null;
-    if (player.car) return;
-    mesh.position.set(player.x, player.y, player.z);
-    mesh.rotation.y = player.heading;
-    const speed = Math.hypot(player.vx, player.vz);
-    player.walkPhase += speed * 0.016 * 2.2;
-    const swing = Math.sin(player.walkPhase) * 0.55 * Math.min(1, speed / 4);
-    mesh.userData.leftArm.rotation.x = swing;
-    mesh.userData.rightArm.rotation.x = -swing;
-  }
-
-  function hurt(amount, source) {
-    if (player.hurtTimer > 0 || player.dead) return;
-    player.health -= amount;
-    player.hurtTimer = 0.6;
-    if (player.health <= 0) {
-      player.health = 0;
-      player.dead = true;
+  function updateOnFoot(dt, ctx) {
+    const input = ctx.input;
+    const axis = input.moveAxis();
+    const running = input.down('ShiftLeft') || input.down('ShiftRight');
+    const maxSpeed = running ? TUNE.runSpeed : TUNE.walkSpeed;
+    const targetSpeed = Math.hypot(axis.x, axis.y) > 0.1 ? maxSpeed : 0;
+    player.speed += (targetSpeed - player.speed) * Math.min(1, 8 * dt);
+    if (player.speed > 0.1) {
+      const fx = Math.sin(player.yaw) * axis.y - Math.cos(player.yaw) * axis.x;
+      const fz = Math.cos(player.yaw) * axis.y + Math.sin(player.yaw) * axis.x;
+      player.x += fx * player.speed * dt;
+      player.z += fz * player.speed * dt;
+      const want = Math.atan2(fx, fz);
+      let diff = want - player.heading;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      player.heading += Math.max(-8 * dt, Math.min(8 * dt, diff));
+      const res = ctx.city.resolveCircle(player.x, player.z, 0.8);
+      player.x = res.x;
+      player.z = res.z;
     }
-  }
-
-  function nearestCarInReach(vehicles) {
-    return vehicles.nearestCar(player.x, player.z, 3.6, (car) => car !== player.car);
-  }
-
-  function enterCar(car, events) {
-    if (!car) return false;
-    player.car = car;
-    car.driver = 'player';
-    car.occupied = true;
-    if (events && events.onEnterCar) events.onEnterCar(car);
-    return true;
-  }
-
-  function exitCar(events) {
-    const car = player.car;
-    if (!car) return;
-    player.car = null;
-    car.driver = null;
-    const side = { x: player.x, z: player.z };
-    player.x = car.x + Math.cos(car.heading) * 2.2;
-    player.z = car.z - Math.sin(car.heading) * 2.2;
-    player.heading = car.heading;
-    if (events && events.onExitCar) events.onExitCar(car);
-    return side;
-  }
-
-  function shoot(peds, vehicles, events) {
-    if (player.shootTimer > 0 || player.reloading > 0) return;
-    if (player.ammo <= 0) {
-      if (player.reserveAmmo > 0) player.reloading = PLAYER.reloadTime;
-      return;
+    // weapon toggle
+    if (input.wasPressed('KeyQ')) {
+      player.weapon = player.weapon === 'pistol' ? 'fists' : 'pistol';
+      if (ctx.hud) ctx.hud.toast(player.weapon === 'pistol' ? 'Pistol out' : 'Fists out');
     }
-    player.ammo -= 1;
-    player.shootTimer = PLAYER.pistolCooldown;
-    const dirX = Math.sin(player.heading);
-    const dirZ = Math.cos(player.heading);
-    // Nearest living ped roughly in front of the shot.
-    let bestPed = null;
-    let bestDist = PLAYER.pistolRange;
-    for (const ped of peds.peds) {
-      if (!ped.alive) continue;
-      const dx = ped.x - player.x;
-      const dz = ped.z - player.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > bestDist) continue;
-      const dot = (dx * dirX + dz * dirZ) / dist;
-      if (dot > 0.94) {
-        bestDist = dist;
-        bestPed = ped;
-      }
+    // reload
+    if (input.wasPressed('KeyR') && player.weapon === 'pistol' && player.mag < TUNE.pistolMag && player.reloading <= 0) {
+      player.reloading = 1.0;
     }
-    if (bestPed) {
-      peds.knockDown(bestPed);
-      if (events && events.onShootHit) events.onShootHit(bestPed, true);
-    } else {
-      // Maybe a car is in the way.
-      const car = vehicles.nearestCar(player.x, player.z, PLAYER.pistolRange, (c) => c !== player.car);
-      if (car) {
-        const dx = car.x - player.x;
-        const dz = car.z - player.z;
-        const dist = Math.hypot(dx, dz);
-        const dot = (dx * dirX + dz * dirZ) / dist;
-        if (dot > 0.96) {
-          car.health -= PLAYER.pistolDamage;
-          if (events && events.onShootHit) events.onShootHit(car, false);
-        }
-      }
-      if (events && events.onShoot) events.onShoot();
-    }
-  }
-
-  function punch(peds, events) {
-    if (player.punchTimer > 0) return;
-    player.punchTimer = PLAYER.punchCooldown;
-    const target = peds.nearestPed(player.x + Math.sin(player.heading) * 1.2, player.z + Math.cos(player.heading) * 1.2, PLAYER.punchRange);
-    if (target) {
-      peds.knockDown(target);
-      if (events && events.onPunchHit) events.onPunchHit(target);
-    } else if (events && events.onPunch) events.onPunch();
-  }
-
-  function update(dt, input, world, events, actions = 0) {
-    if (player.dead) return;
-    player.hurtTimer = Math.max(0, player.hurtTimer - dt);
-    player.punchTimer = Math.max(0, player.punchTimer - dt);
-    player.shootTimer = Math.max(0, player.shootTimer - dt);
     if (player.reloading > 0) {
       player.reloading -= dt;
       if (player.reloading <= 0) {
-        const take = Math.min(PLAYER.pistolMag, player.reserveAmmo);
-        player.ammo = take;
-        player.reserveAmmo -= take;
+        const need = TUNE.pistolMag - player.mag;
+        const take = Math.min(need, player.reserve);
+        player.mag += take;
+        player.reserve -= take;
       }
     }
-    if (player.car) {
-      const car = player.car;
-      const crash = world.vehicles.drivePlayer(car, input, dt, world.city);
-      // The player IS the car while driving: every other system reads player.x/z.
-      player.x = car.x;
-      player.z = car.z;
-      player.heading = car.heading;
-      if (crash && crash.crashed && events && events.onCrash) events.onCrash(crash.strength);
-      if (actions & 4) exitCar(events);
-      if (car.health <= 0) {
-        if (events && events.onCarDestroyed) events.onCarDestroyed(car);
-        player.car = null;
-        car.driver = null;
-        world.vehicles.remove(car);
-        player.x = car.x + 2;
-        player.z = car.z + 2;
-        hurt(25, null);
-      }
-      syncMesh();
-      return;
-    }
-
-    // On foot: camera-relative movement.
-    const { forward, strafe } = input.axes();
-    const camYaw = world.cameraYaw;
-    const fx = Math.sin(camYaw);
-    const fz = Math.cos(camYaw);
-    const rx = Math.cos(camYaw);
-    const rz = -Math.sin(camYaw);
-    const speed = input.running() ? PLAYER.runSpeed : PLAYER.walkSpeed;
-    const tx = (fx * forward + rx * strafe) * speed;
-    const tz = (fz * forward + rz * strafe) * speed;
-    player.vx += (tx - player.vx) * Math.min(1, dt * 10);
-    player.vz += (tz - player.vz) * Math.min(1, dt * 10);
-    const moving = Math.hypot(player.vx, player.vz) > 0.6;
-    if (moving) {
-      player.heading = Math.atan2(player.vx, player.vz);
-    }
-    const nx = player.x + player.vx * dt;
-    const nz = player.z + player.vz * dt;
-    const hit = world.city.collideCircle(nx, nz, PLAYER.radius);
-    if (!hit) {
-      player.x = nx;
-      player.z = nz;
-    } else {
-      // Slide along the wall: try each axis alone.
-      if (!world.city.collideCircle(nx, player.z, PLAYER.radius)) player.x = nx;
-      else if (!world.city.collideCircle(player.x, nz, PLAYER.radius)) player.z = nz;
-    }
-    const clamped = world.city.clampToCity(player.x, player.z, 1);
-    player.x = clamped.x;
-    player.z = clamped.z;
-
-    // Jump.
-    if (player.y === 0 && (actions & 1) && world.screen === 'play') {
-      // Space doubles as confirm on menus; jump only while playing on foot.
-      player.vy = PLAYER.jumpSpeed;
-    }
-    if (player.y > 0 || player.vy !== 0) {
-      player.vy -= 22 * dt;
-      player.y += player.vy * dt;
-      if (player.y <= 0) {
-        player.y = 0;
-        player.vy = 0;
+    player.punchCooldown -= dt;
+    player.shootCooldown -= dt;
+    // left click: punch up close, or shoot
+    if (input.mouseDown && input.mouseButton === 0) {
+      if (player.weapon === 'fists') {
+        if (player.punchCooldown <= 0) {
+          player.punchCooldown = 0.45;
+          punch(ctx);
+        }
+      } else if (player.shootCooldown <= 0 && player.reloading <= 0) {
+        if (player.mag > 0) {
+          player.shootCooldown = 0.22;
+          shoot(ctx);
+        } else {
+          player.shootCooldown = 0.3;
+          if (ctx.audio) ctx.audio.denied();
+        }
       }
     }
-
-    if (actions & 4) {
-      const car = nearestCarInReach(world.vehicles);
-      if (car) {
-        const wasParked = car.driver === null;
-        const wasPolice = car.kind === 'police';
-        enterCar(car, events);
-        if (events && events.onStealCar) events.onStealCar(car, wasParked, wasPolice);
-      }
-    }
-    if (actions & 8) punch(world.peds, events);
-    if (actions & 16) shoot(world.peds, world.vehicles, events);
-    if (actions & 32 && player.ammo < PLAYER.pistolMag && player.reserveAmmo > 0 && player.reloading <= 0) {
-      player.reloading = PLAYER.reloadTime;
-    }
-
-    // Running into a ped at speed knocks them down.
-    if (moving && Math.hypot(player.vx, player.vz) > 7) {
-      const ped = world.peds.nearestPed(player.x, player.z, 1.1);
-      if (ped) {
-        world.peds.knockDown(ped);
-        if (events && events.onHitPed) events.onHitPed(ped);
-      }
-    }
-    // Walking into a parked/traffic car does nothing; driving into peds is handled in main.
-    syncMesh();
+    mesh.visible = true;
+    mesh.position.set(player.x, 0, player.z);
+    mesh.rotation.y = player.heading;
+    mesh.getObjectByName('gun').visible = player.weapon === 'pistol';
+    // walk bob
+    mesh.position.y = player.speed > 0.5 ? Math.abs(Math.sin(performance.now() * 0.012)) * 0.06 : 0;
   }
 
-  player.hurt = hurt;
+  function punch(ctx) {
+    if (ctx.audio) ctx.audio.punch();
+    const fx = Math.sin(player.heading);
+    const fz = Math.cos(player.heading);
+    const ped = ctx.peds ? ctx.peds.nearest(player.x + fx * 1.5, player.z + fz * 1.5, TUNE.fistRange) : null;
+    if (ped) {
+      ctx.peds.knockDown(ped, player.x, player.z);
+      if (ctx.effects) ctx.effects.sparks(ped.x, 1.2, ped.z, 6);
+      if (ctx.onCrime) ctx.onCrime('assault', ped.x, ped.z);
+    }
+  }
+
+  function shoot(ctx) {
+    player.mag -= 1;
+    if (ctx.audio) ctx.audio.shot();
+    // aim along the camera yaw
+    const fx = Math.sin(player.yaw);
+    const fz = Math.cos(player.yaw);
+    if (ctx.effects) ctx.effects.muzzle(player.x + fx * 0.5, 1.3, player.z + fz * 0.5, player.yaw);
+    let best = null;
+    let bestD = TUNE.shootRange;
+    if (ctx.peds) {
+      for (const ped of ctx.peds.peds) {
+        if (ped.state === 'down') continue;
+        const dx = ped.x - player.x;
+        const dz = ped.z - player.z;
+        const d = Math.hypot(dx, dz);
+        if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.01) > 0.92) {
+          bestD = d;
+          best = { kind: 'ped', target: ped };
+        }
+      }
+      for (const cop of ctx.peds.cops) {
+        if (!cop.active || cop.state === 'down') continue;
+        const dx = cop.x - player.x;
+        const dz = cop.z - player.z;
+        const d = Math.hypot(dx, dz);
+        if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.01) > 0.92) {
+          bestD = d;
+          best = { kind: 'cop', target: cop };
+        }
+      }
+    }
+    if (best) {
+      const t = best.target;
+      if (best.kind === 'ped') {
+        ctx.peds.knockDown(t, player.x, player.z);
+        if (ctx.onCrime) ctx.onCrime('shooting', t.x, t.z);
+        if (ctx.peds) ctx.peds.fleeAll(t.x, t.z);
+      } else {
+        t.state = 'down';
+        t.downTimer = 4;
+        t.mesh.rotation.x = Math.PI / 2 - 0.15;
+        t.mesh.position.y = 0.3;
+        if (ctx.onCrime) ctx.onCrime('shoot-cop', t.x, t.z);
+      }
+      if (ctx.effects) ctx.effects.sparks(t.x, 1.2, t.z, 8);
+    }
+  }
+
+  function takeDamage(amount, ctx) {
+    if (player.down) return;
+    player.health -= amount;
+    if (ctx.hud) ctx.hud.flashDamage();
+    if (player.health <= 0) {
+      player.health = 0;
+      player.down = true;
+      if (ctx.onDown) ctx.onDown();
+    }
+  }
+
+  function enterCar(car, ctx) {
+    player.inCar = true;
+    player.car = car;
+    mesh.visible = false;
+    if (ctx.audio) ctx.audio.pickup();
+  }
+
+  // While driving, Leo IS the car: every system that reads player.x/z
+  // (missions, wanted, camera, peds, minimap) must see the car's position.
+  function updateInCar() {
+    if (!player.car) return;
+    player.x = player.car.x;
+    player.z = player.car.z;
+    player.heading = player.car.heading;
+    player.speed = player.car.speed;
+  }
+
+  function exitCar(ctx) {
+    if (!player.car) return;
+    const car = player.car;
+    player.inCar = false;
+    player.car = null;
+    // step out on the driver's side
+    const sx = Math.cos(car.heading);
+    const sz = -Math.sin(car.heading);
+    player.x = car.x + sx * 2.4;
+    player.z = car.z + sz * 2.4;
+    player.heading = car.heading;
+    const res = ctx.city.resolveCircle(player.x, player.z, 0.8);
+    player.x = res.x;
+    player.z = res.z;
+    mesh.visible = true;
+    mesh.position.set(player.x, 0, player.z);
+  }
+
+  function reset(spawnPoint) {
+    player.x = spawnPoint.x;
+    player.z = spawnPoint.z;
+    player.heading = 0;
+    player.yaw = 0;
+    player.speed = 0;
+    player.health = TUNE.playerHealth;
+    player.inCar = false;
+    player.car = null;
+    player.mag = TUNE.pistolMag;
+    player.reserve = 96;
+    player.down = false;
+    mesh.visible = true;
+    mesh.position.set(player.x, 0, player.z);
+  }
+
+  player.updateOnFoot = updateOnFoot;
+  player.updateInCar = updateInCar;
+  player.takeDamage = takeDamage;
   player.enterCar = enterCar;
   player.exitCar = exitCar;
-  player.update = update;
-  player.syncMesh = syncMesh;
+  player.reset = reset;
   return player;
 }

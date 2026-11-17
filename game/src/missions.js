@@ -1,207 +1,216 @@
-// The story: Leo Marín owes $4,500 to the loan shark Rocco Vane, and Ada Kwan, his
-// dispatcher, lines up the jobs that pay it off. Five missions, then side jobs for cash
-// in free roam. A mission is a chain of steps (drive somewhere, pick something up, lose
-// the cops, run fares); the manager reports completions and failures as events.
+// Solmar Heat — missions and side jobs.
+// One job: the story's state machine — which mission is live, what its
+// current step asks, whether it is done, and what it pays.
 
-const MISSIONS = [
-  {
-    id: 'first-wheels',
-    title: 'First Wheels',
-    briefing: 'Ada: "Leo, you need wheels before anything. Grab any car on the street and bring it to my garage, south-west corner."',
-    reward: 400,
-    steps: [
-      { type: 'enterCar', text: 'Steal a car — walk up to one and press E' },
-      { type: 'goto', x: -84, z: 96, radius: 8, text: 'Drive to Ada\'s garage' },
-    ],
-  },
-  {
-    id: 'package-run',
-    title: 'Package Run',
-    briefing: 'Ada: "A package is waiting on the marina dock. Pick it up and take it to the Hotel Solmar — fast. The client pays for speed."',
-    reward: 600,
-    steps: [
-      { type: 'goto', x: 214, z: 48, radius: 7, text: 'Pick up the package at the marina dock' },
-      { type: 'goto', x: 84, z: -56, radius: 8, time: 100, text: 'Deliver the package to the Hotel Solmar' },
-    ],
-  },
-  {
-    id: 'lose-the-heat',
-    title: 'Lose the Heat',
-    briefing: 'Ada: "You got spotted, Leo. Two stars and the whole department is awake. Shake them off — get clean and meet me at the pier."',
-    reward: 800,
-    startWanted: 2,
-    steps: [
-      { type: 'escape', time: 150, text: 'Lose the cops — get your wanted level to zero' },
-      { type: 'goto', x: 0, z: 196, radius: 8, text: 'Meet Ada at the south pier' },
-    ],
-  },
-  {
-    id: 'night-shift',
-    title: 'Night Shift',
-    briefing: 'Ada: "Quiet night, loud money. Three fares, three drop-offs. Keep the meter running and the car in one piece."',
-    reward: 900,
-    steps: [
-      { type: 'goto', x: -168, z: -20, radius: 7, text: 'Pick up fare 1 at the north-west corner' },
-      { type: 'goto', x: 126, z: 84, radius: 7, text: 'Drop off fare 1 at the east market' },
-      { type: 'goto', x: 42, z: -168, radius: 7, text: 'Pick up fare 2 at the north avenue' },
-      { type: 'goto', x: -126, z: 126, radius: 7, text: 'Drop off fare 2 at the plaza' },
-      { type: 'goto', x: 168, z: 0, radius: 7, text: 'Pick up fare 3 at the marina gate' },
-      { type: 'goto', x: -42, z: -84, radius: 7, text: 'Drop off fare 3 downtown' },
-    ],
-  },
-  {
-    id: 'big-score',
-    title: 'The Big Score',
-    briefing: 'Ada: "Last one, Leo. Rocco\'s courier van leaves the downtown bank at dawn. Take it, bring it to the hideout, and your debt is gone."',
-    reward: 2000,
-    startWanted: 3,
-    needsVan: true,
-    steps: [
-      { type: 'enterCar', van: true, text: 'Steal the courier van at the downtown bank' },
-      { type: 'goto', x: -168, z: -154, radius: 9, text: 'Deliver the van to the hideout — and lose the cops' },
-    ],
-  },
-];
+import { MISSIONS, SIDE_JOBS, PLACES } from './config.js';
+import { mulberry32, range, pick } from './random.js';
 
-export function createMissions(city, random) {
-  let index = 0; // next mission to start
-  let active = null; // { mission, stepIndex, timeLeft }
-  let sideJob = null;
-  let sideJobCount = 0;
+export function createMissions(seed) {
+  const rng = mulberry32(seed);
+  const missions = {
+    index: 0, // next story mission to play
+    active: null, // {def, stepIndex, timer, holdTimer, taxiState, ...}
+    done: [], // ids of finished story missions
+    cash: 0,
+    sideJob: null, // {kind, phase, pickup, drop, fare}
+    message: '',
+  };
 
-  function markerFor(step) {
-    if (!step) return null;
-    if (step.type === 'enterCar') return null;
-    if (step.type === 'escape') return null;
-    return { x: step.x, z: step.z };
-  }
-
-  // Restore the story position after loading a save (or reset it for a new game):
-  // startMission() only sets the active mission, it never moves the index, so
-  // without this Continue would show mission N's card but start mission 1.
-  function setProgress(done) {
-    index = Math.max(0, Math.min(MISSIONS.length, done | 0));
-  }
-
-  function startMission(i, events) {
-    const mission = MISSIONS[i];
-    active = { mission, stepIndex: 0, timeLeft: mission.steps[0].time ?? 0 };
-    if (mission.startWanted && events && events.onMissionStartWanted) {
-      events.onMissionStartWanted(mission.startWanted);
+  function startNext(ctx) {
+    if (missions.index >= MISSIONS.length) {
+      missions.active = null;
+      if (ctx.hud) ctx.hud.toast('All story jobs done — free roam side jobs pay from here.');
+      offerSideJob(ctx);
+      return null;
     }
-    if (mission.needsVan && events && events.onNeedVan) events.onNeedVan();
-    return active;
-  }
-
-  function startSideJob(events) {
-    sideJobCount += 1;
-    const pickup = city.randomRoadPoint();
-    const drop = city.randomRoadPoint();
-    sideJob = {
-      mission: {
-        id: `side-${sideJobCount}`,
-        title: 'Side Job',
-        briefing: 'Ada: "Quick cash, Leo. A fare needs a ride across town."',
-        reward: 150 + random.int(0, 3) * 50,
-      },
+    const def = MISSIONS[missions.index];
+    missions.active = {
+      def,
       stepIndex: 0,
-      timeLeft: 0,
-      steps: [
-        { type: 'goto', x: pickup.x, z: pickup.z, radius: 7, text: 'Pick up the fare' },
-        { type: 'goto', x: drop.x, z: drop.z, radius: 7, time: 90, text: 'Drop off the fare' },
-      ],
+      timer: def.timeLimit || 0,
+      holdTimer: 0,
+      taxiDone: 0,
+      taxiPhase: 'pickup',
+      taxiPickup: null,
+      taxiDrop: null,
     };
-    active = sideJob;
-    return active;
+    // a taxi first step needs its first fare generated before play begins
+    if (def.steps[0] && def.steps[0].kind === 'taxi') beginTaxiFare(ctx);
+    if (ctx) ctx.screen = 'card';
+    if (ctx.hud) ctx.hud.showMissionCard(def);
+    return missions.active;
   }
 
-  function currentStep() {
-    if (!active) return null;
-    return active.mission.steps[active.stepIndex] ?? null;
+  function step() {
+    if (!missions.active) return null;
+    return missions.active.def.steps[missions.active.stepIndex] || null;
   }
 
-  function objectiveText() {
-    if (!active) return '';
-    const step = currentStep();
-    if (!step) return '';
-    return `${active.mission.title}: ${step.text}`;
-  }
-
-  function update(dt, player, wanted, events) {
-    if (!active) return;
-    const step = currentStep();
-    if (!step) return;
-    if (step.time) {
-      active.timeLeft -= dt;
-      if (active.timeLeft <= 0) {
-        const failed = active;
-        active = null;
-        if (events && events.onMissionFail) events.onMissionFail(failed.mission, 'Out of time');
-        return;
-      }
+  function stepTarget() {
+    const s = step();
+    if (!s) return null;
+    const m = missions.active;
+    if (s.kind === 'taxi') {
+      if (m.taxiPhase === 'pickup') return m.taxiPickup;
+      return m.taxiDrop;
     }
-    let done = false;
-    if (step.type === 'enterCar') {
-      done = !!player.car && (!step.van || player.car.kind === 'van');
-    } else if (step.type === 'escape') {
-      done = wanted.stars === 0;
-    } else if (step.type === 'goto') {
-      const dist = Math.hypot(player.x - step.x, player.z - step.z);
-      done = dist <= step.radius;
+    if (s.kind === 'steal') {
+      // the marked car itself is the target
+      return s.at;
     }
-    if (!done) return;
-    active.stepIndex += 1;
-    if (events && events.onStepComplete) events.onStepComplete(active.mission, active.stepIndex);
-    const next = currentStep();
-    if (next) {
-      active.timeLeft = next.time ?? 0;
+    return s.at;
+  }
+
+  function stepText() {
+    const s = step();
+    if (!s) return '';
+    if (s.kind === 'taxi') {
+      const m = missions.active;
+      if (m.taxiPhase === 'pickup') return `Pick up fare ${m.taxiDone + 1} of ${s.fares}`;
+      return `Drop off fare ${m.taxiDone + 1} of ${s.fares}`;
+    }
+    return s.text;
+  }
+
+  function randomStreetPoint() {
+    const streets = [-80, -40, 0, 40, 80];
+    return { x: pick(rng, streets), z: range(rng, -80, 80) };
+  }
+
+  function beginTaxiFare(ctx) {
+    const m = missions.active;
+    const p = randomStreetPoint();
+    // drop somewhere across town
+    let d = randomStreetPoint();
+    while (Math.hypot(d.x - p.x, d.z - p.z) < 60) d = randomStreetPoint();
+    m.taxiPickup = p;
+    m.taxiDrop = d;
+    m.taxiPhase = 'pickup';
+    if (ctx.hud) ctx.hud.toast('New fare waiting — follow the marker.');
+  }
+
+  function completeStep(ctx) {
+    const m = missions.active;
+    const s = step();
+    if (!s) return;
+    m.stepIndex++;
+    if (m.stepIndex >= m.def.steps.length) {
+      completeMission(ctx);
       return;
     }
-    // Mission complete.
-    const finished = active;
-    active = null;
-    if (finished === sideJob) sideJob = null;
-    else index = Math.min(MISSIONS.length, index + 1);
-    if (events && events.onMissionComplete) events.onMissionComplete(finished.mission, finished.mission.reward);
+    const next = step();
+    if (next && next.kind === 'taxi') beginTaxiFare(ctx);
+    if (ctx.hud) ctx.hud.toast(next ? next.text : '');
   }
 
-  function startNext(events) {
-    if (index < MISSIONS.length) return startMission(index, events);
-    return startSideJob(events);
+  function completeMission(ctx) {
+    const m = missions.active;
+    missions.cash += m.def.payout;
+    missions.done.push(m.def.id);
+    missions.index++;
+    missions.active = null;
+    if (ctx.audio) ctx.audio.missionDone();
+    if (ctx.hud) ctx.hud.showPayout(m.def.payout, m.def.title);
+    if (ctx.save) ctx.save();
   }
 
-  function retry(events) {
-    if (active) return active;
-    // Retry the last failed mission (the index still points at it).
-    return startNext(events);
+  function offerSideJob(ctx) {
+    if (missions.sideJob) return;
+    const kind = rng() < 0.6 ? 'taxi' : 'courier';
+    const p = randomStreetPoint();
+    let d = randomStreetPoint();
+    while (Math.hypot(d.x - p.x, d.z - p.z) < 60) d = randomStreetPoint();
+    const fare = kind === 'taxi'
+      ? Math.round(range(rng, SIDE_JOBS.taxiFare.min, SIDE_JOBS.taxiFare.max))
+      : Math.round(range(rng, SIDE_JOBS.courier.min, SIDE_JOBS.courier.max));
+    missions.sideJob = { kind, phase: 'pickup', pickup: p, drop: d, fare };
+    if (ctx.hud) ctx.hud.toast(kind === 'taxi' ? `Side job: taxi fare $${fare}` : `Side job: courier run $${fare}`);
   }
 
-  return {
-    missions: MISSIONS,
-    get active() {
-      return active;
-    },
-    get nextIndex() {
-      return index;
-    },
-    get storyDone() {
-      return index >= MISSIONS.length;
-    },
-    get marker() {
-      return markerFor(currentStep());
-    },
-    get timeLeft() {
-      return active ? active.timeLeft : 0;
-    },
-    get timeLimit() {
-      const step = currentStep();
-      return step && step.time ? step.time : 0;
-    },
-    objectiveText,
-    update,
-    startNext,
-    retry,
-    startMission,
-    setProgress,
-  };
+  function update(dt, ctx) {
+    const m = missions.active;
+    const player = ctx.player;
+    if (m) {
+      const s = step();
+      if (!s) return;
+      // mission timers run only while the timed step is live
+      if (s.timed && m.timer > 0) {
+        m.timer -= dt;
+        if (m.timer <= 0) {
+          if (ctx.hud) ctx.hud.toast('Too slow — the package run failed. Try the job again.');
+          // restart this mission from its first step
+          m.stepIndex = 0;
+          m.timer = m.def.timeLimit || 0;
+          m.taxiDone = 0;
+          return;
+        }
+      }
+      const px = player.x;
+      const pz = player.z;
+      if (s.kind === 'goto' || s.kind === 'pickup') {
+        const t = s.at;
+        if (Math.hypot(px - t.x, pz - t.z) < 8) completeStep(ctx);
+      } else if (s.kind === 'evade') {
+        const t = s.at;
+        if (Math.hypot(px - t.x, pz - t.z) < 10) completeStep(ctx);
+      } else if (s.kind === 'hide') {
+        const t = s.at;
+        const near = Math.hypot(px - t.x, pz - t.z) < 12;
+        if (near && ctx.wanted.stars === 0) {
+          m.holdTimer += dt;
+          if (m.holdTimer >= (s.holdSeconds || 8)) completeStep(ctx);
+        } else {
+          m.holdTimer = Math.max(0, m.holdTimer - dt * 2);
+        }
+      } else if (s.kind === 'taxi') {
+        if (m.taxiPhase === 'pickup') {
+          if (Math.hypot(px - m.taxiPickup.x, pz - m.taxiPickup.z) < 7) {
+            m.taxiPhase = 'drop';
+            if (ctx.hud) ctx.hud.toast('Fare aboard — take them to the marker.');
+          }
+        } else if (Math.hypot(px - m.taxiDrop.x, pz - m.taxiDrop.z) < 7) {
+          m.taxiDone++;
+          if (ctx.audio) ctx.audio.pickup();
+          if (m.taxiDone >= s.fares) {
+            completeStep(ctx);
+          } else {
+            beginTaxiFare(ctx);
+          }
+        }
+      } else if (s.kind === 'steal') {
+        // completed by main.js when the player enters the marked car
+      }
+    } else if (missions.index >= MISSIONS.length) {
+      // free-roam side jobs
+      if (!missions.sideJob) offerSideJob(ctx);
+      const j = missions.sideJob;
+      if (j) {
+        const t = j.phase === 'pickup' ? j.pickup : j.drop;
+        if (Math.hypot(player.x - t.x, player.z - t.z) < 7) {
+          if (j.phase === 'pickup') {
+            j.phase = 'drop';
+            if (ctx.hud) ctx.hud.toast('Got it — deliver to the marker.');
+          } else {
+            missions.cash += j.fare;
+            if (ctx.audio) ctx.audio.missionDone();
+            if (ctx.hud) ctx.hud.showPayout(j.fare, j.kind === 'taxi' ? 'Taxi fare' : 'Courier run');
+            missions.sideJob = null;
+            if (ctx.save) ctx.save();
+          }
+        }
+      }
+    }
+  }
+
+  missions.startNext = startNext;
+  missions.step = step;
+  missions.stepTarget = stepTarget;
+  missions.stepText = stepText;
+  missions.beginTaxiFare = beginTaxiFare;
+  missions.completeStep = completeStep;
+  missions.completeMission = completeMission;
+  missions.update = update;
+  missions.offerSideJob = offerSideJob;
+  missions.places = PLACES;
+  return missions;
 }
