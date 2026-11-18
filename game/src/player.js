@@ -153,11 +153,13 @@ export class Player {
       const len = Math.hypot(mx, my);
       mx /= len;
       my /= len;
-      // Camera-relative: forward is away from the camera.
+      // Camera-relative: forward is away from the camera. The strafe
+      // vector is the camera's true screen-right: (-cos h, sin h), so D
+      // turns the player right — the same as D in a car.
       const fx = Math.sin(camHeading);
       const fz = Math.cos(camHeading);
-      const rx = Math.cos(camHeading);
-      const rz = -Math.sin(camHeading);
+      const rx = -Math.cos(camHeading);
+      const rz = Math.sin(camHeading);
       const wx = fx * my + rx * mx;
       const wz = fz * my + rz * mx;
       const run = input.down('shift') ? CONFIG.runSpeed : CONFIG.walkSpeed;
