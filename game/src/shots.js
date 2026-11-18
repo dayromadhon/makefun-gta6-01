@@ -12,8 +12,9 @@ export function runShot(name, game) {
   hud.hidePause();
 
   if (name === 'cover') {
-    // On foot in Central Plaza, downtown towers ahead, traffic and peds around.
-    player.spawn(0, -10);
+    // On foot in Central Plaza (the z=30 road), downtown towers ahead,
+    // traffic and peds around.
+    player.spawn(0, 30);
     player.heading = Math.PI;
     player.mesh.rotation.y = Math.PI;
     missions.index = 0;
@@ -23,15 +24,15 @@ export function runShot(name, game) {
     missions.setObjective(car.mesh.position.x, car.mesh.position.z, 'Steal a car');
     hud.setObjective('Steal a car (press E near one)');
     step(150);
-    camera.setPose(6, 5.5, 8, -4, 6, -90);
+    camera.setPose(8, 6, 40, -6, 5, -60);
   } else if (name === 'street') {
-    // Driving down the palm avenue, traffic ahead.
+    // Driving east down the z=-30 palm avenue, traffic ahead.
     const car = vehicles.parked[2];
     player.spawn(car.mesh.position.x, car.mesh.position.z);
     player.enterCar(car, game);
     player.carSpeed = 22;
     car.mesh.rotation.y = Math.PI / 2;
-    car.mesh.position.set(-60, 0, 0);
+    car.mesh.position.set(-90, 0, -30);
     missions.index = 0;
     missions.active = false;
     missions.clearObjective();
@@ -40,15 +41,15 @@ export function runShot(name, game) {
     // Keep rolling forward while the camera frames the avenue.
     car.mesh.position.x += 30;
     player.pos.set(car.mesh.position.x, 0, car.mesh.position.z);
-    camera.setPose(-88, 6, -10, -40, 2, 0);
+    camera.setPose(-118, 6, -36, -60, 2, -30);
   } else if (name === 'chase') {
-    // 3-star chase: police cars on the player's tail.
+    // 3-star chase: police cars on the player's tail, east on the z=30 road.
     const car = vehicles.parked[3];
     player.spawn(car.mesh.position.x, car.mesh.position.z);
     player.enterCar(car, game);
     player.carSpeed = 26;
     car.mesh.rotation.y = Math.PI / 2;
-    car.mesh.position.set(-40, 0, 60);
+    car.mesh.position.set(-40, 0, 30);
     wanted.setStars(3);
     missions.index = 0;
     missions.active = false;
@@ -57,15 +58,15 @@ export function runShot(name, game) {
     step(150);
     car.mesh.position.x += 24;
     player.pos.set(car.mesh.position.x, 0, car.mesh.position.z);
-    camera.setPose(-72, 7, 46, -10, 2, 60);
+    camera.setPose(-72, 7, 20, -10, 2, 30);
   } else if (name === 'mission') {
     // Mission 2 in progress: package run to Hotel Solmar, beacon lit, timer live.
     const car = vehicles.parked[4];
     player.spawn(car.mesh.position.x, car.mesh.position.z);
     player.enterCar(car, game);
     player.carSpeed = 20;
-    car.mesh.rotation.y = -Math.PI / 4;
-    car.mesh.position.set(120, 0, 40);
+    car.mesh.rotation.y = Math.PI;
+    car.mesh.position.set(90, 0, -20);
     missions.index = 1;
     missions.stage = 1;
     missions.active = true;
@@ -75,12 +76,12 @@ export function runShot(name, game) {
     hud.setObjective('Deliver to Hotel Solmar — 74s!');
     hud.setTimer(74);
     step(120);
-    camera.setPose(96, 7, 62, 60, 4, -60);
+    camera.setPose(100, 7, 8, 64, 4, -70);
   } else {
     // Unknown scene: plain establishing shot.
-    player.spawn(0, -10);
+    player.spawn(0, 30);
     step(90);
-    camera.setPose(6, 5.5, 8, -4, 6, -90);
+    camera.setPose(8, 6, 40, -6, 5, -60);
   }
   hud.update(0, game);
   window.__shotReady = true;
