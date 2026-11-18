@@ -1,67 +1,98 @@
-// input.js — keyboard + mouse state with edge detection (pressed this frame).
+// SOLMAR HEAT — input.js
+// One job: read the keyboard and the mouse and hand the game a clean state.
+// Keys are tracked by code (KeyW, ArrowUp, Space...). Mouse drag orbits the
+// camera; a click on the game canvas (never on the HUD) is a shot/punch.
+
 export class Input {
-  constructor() {
+  constructor(canvas) {
+    this.canvas = canvas;
     this.keys = new Set();
-    this.pressed = new Set();
-    this.mouseX = 0;
-    this.mouseY = 0;
+    this.pressed = new Set(); // edge-triggered, consumed by the game each frame
     this.mouseDown = false;
-    this.mousePressed = false;
-    this.anyKey = false;
-    window.addEventListener('keydown', (e) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
-      if (!e.repeat) {
-        this.pressed.add(e.key.toLowerCase());
-        this.anyKey = true;
-      }
-      this.keys.add(e.key.toLowerCase());
-    });
-    window.addEventListener('keyup', (e) => {
-      this.keys.delete(e.key.toLowerCase());
-    });
-    window.addEventListener('mousemove', (e) => {
-      this.mouseX = e.clientX;
-      this.mouseY = e.clientY;
-    });
-    window.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = true;
-        // Only a click on the game canvas fires the pistol: clicks on HUD
-        // buttons (New Game, GO, Continue) must not shoot.
-        this.mousePressed = !!(e.target && e.target.id === 'game-canvas');
-      }
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
-    });
-    window.addEventListener('blur', () => {
+    this.mouseClicked = false; // edge-triggered click on the canvas
+    this.dragDX = 0;
+    this.dragDY = 0;
+    this._dragging = false;
+    this._lastX = 0;
+    this._lastY = 0;
+    this._onKeyDown = (e) => {
+      if (e.repeat) return;
+      this.keys.add(e.code);
+      this.pressed.add(e.code);
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+    };
+    this._onKeyUp = (e) => this.keys.delete(e.code);
+    this._onMouseDown = (e) => {
+      if (e.button !== 0) return;
+      this.mouseDown = true;
+      this.mouseClicked = true;
+      this._dragging = true;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
+    };
+    this._onMouseUp = () => {
+      this.mouseDown = false;
+      this._dragging = false;
+    };
+    this._onMouseMove = (e) => {
+      if (!this._dragging) return;
+      this.dragDX += e.clientX - this._lastX;
+      this.dragDY += e.clientY - this._lastY;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
+    };
+    this._onBlur = () => {
       this.keys.clear();
       this.mouseDown = false;
-    });
+      this._dragging = false;
+    };
+    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keyup', this._onKeyUp);
+    window.addEventListener('blur', this._onBlur);
+    canvas.addEventListener('mousedown', this._onMouseDown);
+    window.addEventListener('mouseup', this._onMouseUp);
+    window.addEventListener('mousemove', this._onMouseMove);
   }
-  down(key) {
-    return this.keys.has(key.toLowerCase());
+
+  isDown(code) {
+    return this.keys.has(code);
   }
-  wasPressed(key) {
-    return this.pressed.has(key.toLowerCase());
+
+  // True once, on the frame the key went down. The game calls this per frame.
+  wasPressed(code) {
+    return this.pressed.has(code);
   }
-  // Call at the end of each frame so edges last exactly one frame.
+
+  // Movement axes: -1..1. Forward is W/Up, strafe is A/D (D is always right,
+  // on foot and in a car — the right vector is computed the same way in both).
+  moveForward() {
+    let f = 0;
+    if (this.isDown('KeyW') || this.isDown('ArrowUp')) f += 1;
+    if (this.isDown('KeyS') || this.isDown('ArrowDown')) f -= 1;
+    return f;
+  }
+
+  moveStrafe() {
+    let s = 0;
+    if (this.isDown('KeyD') || this.isDown('ArrowRight')) s += 1;
+    if (this.isDown('KeyA') || this.isDown('ArrowLeft')) s -= 1;
+    return s;
+  }
+
+  // Call at the end of every frame: clears edge triggers and drag deltas.
   endFrame() {
     this.pressed.clear();
-    this.mousePressed = false;
-    this.anyKey = false;
+    this.mouseClicked = false;
+    this.dragDX = 0;
+    this.dragDY = 0;
   }
-  // Driving / walking axes: -1..1.
-  moveX() {
-    let x = 0;
-    if (this.down('a') || this.down('arrowleft')) x -= 1;
-    if (this.down('d') || this.down('arrowright')) x += 1;
-    return x;
-  }
-  moveY() {
-    let y = 0;
-    if (this.down('w') || this.down('arrowup')) y += 1;
-    if (this.down('s') || this.down('arrowdown')) y -= 1;
-    return y;
+
+  dispose() {
+    window.removeEventListener('keydown', this._onKeyDown);
+    window.removeEventListener('keyup', this._onKeyUp);
+    window.removeEventListener('blur', this._onBlur);
+    this.canvas.removeEventListener('mousedown', this._onMouseDown);
+    window.removeEventListener('mouseup', this._onMouseUp);
+    window.removeEventListener('mousemove', this._onMouseMove);
   }
 }

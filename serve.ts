@@ -1,30 +1,55 @@
-// serve.ts — dev server for play-testing: serves game/ at http://localhost:8080.
-// Node 22 standard library only.
+// SOLMAR HEAT — serve.ts
+// A tiny static server for game/ so the entry can be played locally with no
+// build step: `node serve.ts` serves game/ on http://localhost:8080.
+// Standard library only; refuses any path outside game/.
+
+import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(fileURLToPath(new URL('.', import.meta.url)), 'game');
-const types = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
+const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+const args = process.argv.slice(2);
+const portIndex = args.indexOf('--port');
+const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
+const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
 };
-const port = parseInt(process.env.PORT || '8080', 10);
-createServer((req, res) => {
-  const path = decodeURIComponent(new URL(req.url || '/', 'http://localhost').pathname);
-  const file = join(root, path === '/' ? 'index.html' : path);
-  if (!file.startsWith(root) || !existsSync(file)) {
+
+const server = createServer((req, res) => {
+  try {
+    const url = new URL(req.url || '/', 'http://localhost');
+    let rel = decodeURIComponent(url.pathname);
+    if (rel === '/') rel = '/index.html';
+    const file = resolve(join(root, normalize(rel).replace(/^(\.\.[/\\])+/, '')));
+    if (!file.startsWith(root + sep) && file !== root) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    const st = statSync(file);
+    if (!st.isFile()) {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+    createReadStream(file).pipe(res);
+  } catch (e) {
     res.writeHead(404);
     res.end('not found');
-    return;
   }
-  res.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream' });
-  res.end(readFileSync(file));
-}).listen(port, () => console.log(`SOLMAR HEAT at http://localhost:${port}/`));
+});
+
+server.listen(port, () => {
+  console.log(`SOLMAR HEAT at http://localhost:${port}`);
+});

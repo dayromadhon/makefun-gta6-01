@@ -1,66 +1,104 @@
-// effects.js — particle bursts (impacts, gunshots, exhaust) on one shared Points cloud.
+// SOLMAR HEAT — effects.js
+// One job: juice — pooled particle bursts (crash sparks, exhaust puffs,
+// muzzle flashes), a mission beacon, and the objective marker in the world.
+// No per-frame allocation: one pool of small meshes, reused.
+
+import * as THREE from 'three';
+
+const POOL = 240;
+
 export class Effects {
-  constructor(scene, lowFx) {
+  constructor(scene) {
     this.scene = scene;
-    this.max = lowFx ? 120 : 300;
-    this.positions = new Float32Array(this.max * 3);
-    this.colors = new Float32Array(this.max * 3);
-    this.vel = new Float32Array(this.max * 3);
-    this.life = new Float32Array(this.max);
-    for (let i = 0; i < this.max; i++) {
-      this.positions[i * 3 + 1] = -999;
+    this.parts = [];
+    const geo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
+    for (let i = 0; i < POOL; i++) {
+      const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      m.visible = false;
+      scene.add(m);
+      this.parts.push({ mesh: m, life: 0, vx: 0, vy: 0, vz: 0, grav: 0 });
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    const mat = new THREE.PointsMaterial({ size: 0.55, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false });
-    this.points = new THREE.Points(geo, mat);
-    this.points.frustumCulled = false;
-    this.scene.add(this.points);
-    this.cursor = 0;
+    this._next = 0;
+    // Mission beacon: a glowing column + a pulsing ring on the ground.
+    this.beacon = new THREE.Group();
+    const col = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.9, 0.9, 30, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xf7c948, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    col.position.y = 15;
+    this.beacon.add(col);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.2, 3.0, 24),
+      new THREE.MeshBasicMaterial({ color: 0xf7c948, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.15;
+    this.beacon.add(ring);
+    this.beacon.visible = false;
+    scene.add(this.beacon);
+    this._ring = ring;
   }
 
-  burst(x, y, z, colorHex, n) {
-    const r = ((colorHex >> 16) & 255) / 255;
-    const g = ((colorHex >> 8) & 255) / 255;
-    const b = (colorHex & 255) / 255;
-    for (let k = 0; k < n; k++) {
-      const i = this.cursor;
-      this.cursor = (this.cursor + 1) % this.max;
-      this.positions[i * 3] = x;
-      this.positions[i * 3 + 1] = y;
-      this.positions[i * 3 + 2] = z;
-      this.colors[i * 3] = r;
-      this.colors[i * 3 + 1] = g;
-      this.colors[i * 3 + 2] = b;
-      const a = Math.random() * Math.PI * 2;
-      const up = Math.random() * 4 + 1;
-      const sp = Math.random() * 4 + 1;
-      this.vel[i * 3] = Math.cos(a) * sp;
-      this.vel[i * 3 + 1] = up;
-      this.vel[i * 3 + 2] = Math.sin(a) * sp;
-      this.life[i] = 0.6 + Math.random() * 0.4;
-    }
+  _spawn(x, y, z, color, speed, life, grav) {
+    const p = this.parts[this._next];
+    this._next = (this._next + 1) % POOL;
+    p.mesh.visible = true;
+    p.mesh.position.set(x, y, z);
+    p.mesh.material.color.setHex(color);
+    const a = Math.random() * Math.PI * 2;
+    const up = Math.random() * 0.6 + 0.4;
+    p.vx = Math.cos(a) * speed;
+    p.vz = Math.sin(a) * speed;
+    p.vy = up * speed;
+    p.life = life;
+    p.grav = grav;
+  }
+
+  burst(x, y, z, color, n, speed) {
+    for (let i = 0; i < n; i++) this._spawn(x, y, z, color, speed * (0.5 + Math.random() * 0.8), 0.5 + Math.random() * 0.5, 9);
+  }
+
+  exhaust(x, y, z) {
+    this._spawn(x, y, z, 0x9a9a9a, 0.8, 0.7, -1.5);
+  }
+
+  muzzle(x, y, z) {
+    this.burst(x, y, z, 0xffd76e, 6, 3);
+  }
+
+  crash(x, y, z) {
+    this.burst(x, y, z, 0xff8a3c, 18, 6);
+    this.burst(x, y, z, 0xffffff, 8, 4);
+  }
+
+  setBeacon(x, z, on) {
+    this.beacon.visible = !!on;
+    if (on) this.beacon.position.set(x, 0, z);
   }
 
   update(dt) {
-    for (let i = 0; i < this.max; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      if (this.life[i] <= 0) {
-        this.positions[i * 3 + 1] = -999;
+    for (const p of this.parts) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) {
+        p.mesh.visible = false;
         continue;
       }
-      this.vel[i * 3 + 1] -= 9 * dt;
-      this.positions[i * 3] += this.vel[i * 3] * dt;
-      this.positions[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
-      this.positions[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      if (this.positions[i * 3 + 1] < 0.05) {
-        this.positions[i * 3 + 1] = 0.05;
-        this.vel[i * 3 + 1] = 0;
+      p.vy -= p.grav * dt;
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.mesh.position.z += p.vz * dt;
+      if (p.mesh.position.y < 0.1) {
+        p.mesh.position.y = 0.1;
+        p.vy = 0;
       }
+      const s = Math.max(0.2, p.life);
+      p.mesh.scale.setScalar(s);
     }
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
+    if (this.beacon.visible) {
+      const t = performance.now() / 400;
+      this._ring.scale.setScalar(1 + Math.sin(t) * 0.15);
+      this.beacon.rotation.y += dt * 0.8;
+    }
   }
 }

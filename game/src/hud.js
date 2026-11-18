@@ -1,256 +1,193 @@
-// hud.js — HUD, minimap, menus: all DOM, built here so index.html stays small.
+// SOLMAR HEAT — hud.js
+// One job: everything drawn on top of the 3D view — the HUD (stars, cash,
+// health, speed, ammo), the minimap, the mission card, the centre messages
+// and the title / pause / busted / mission-complete screens. The HUD never
+// takes a click meant for the game: only its buttons accept pointer events.
+
 import { CONFIG } from './config.js';
 
-function el(tag, id, parent, text = '') {
-  const e = document.createElement(tag);
-  if (id) e.id = id;
-  if (text) e.textContent = text;
-  if (parent) parent.appendChild(e);
-  return e;
-}
-
 export class HUD {
-  constructor(handlers) {
-    this.handlers = handlers;
-    this.root = el('div', 'hud', document.body);
-    this.root.style.cssText = 'position:fixed;inset:0;pointer-events:none;font-family:Arial,sans-serif;color:#fff;z-index:10';
-    // Top-left: cash + debt.
-    const tl = el('div', 'hud-tl', this.root);
-    tl.style.cssText = 'position:absolute;top:12px;left:12px;text-shadow:0 1px 3px #000';
-    this.cashEl = el('div', 'hud-cash', tl, '$0');
-    this.cashEl.style.cssText = 'font-size:26px;font-weight:bold;color:#7dff8a';
-    this.debtEl = el('div', 'hud-debt', tl, 'Debt $4,500');
-    this.debtEl.style.cssText = 'font-size:15px;color:#ffb0b0';
-    // Top-right: stars + minimap.
-    const tr = el('div', 'hud-tr', this.root);
-    tr.style.cssText = 'position:absolute;top:12px;right:12px;text-align:right';
-    this.starsEl = el('div', 'hud-stars', tr, '');
-    this.starsEl.style.cssText = 'font-size:26px;letter-spacing:4px;text-shadow:0 1px 3px #000';
-    this.map = el('canvas', 'hud-map', tr);
-    this.map.width = 180;
-    this.map.height = 180;
-    this.map.style.cssText = 'width:180px;height:180px;border:2px solid rgba(255,255,255,.6);border-radius:4px;background:#20242a;margin-top:6px';
-    // Top-centre: objective + timer.
-    const tc = el('div', 'hud-tc', this.root);
-    tc.style.cssText = 'position:absolute;top:12px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 1px 3px #000';
-    this.objectiveEl = el('div', 'hud-objective', tc, '');
-    this.objectiveEl.style.cssText = 'font-size:17px;font-weight:bold';
-    this.timerEl = el('div', 'hud-timer', tc, '');
-    this.timerEl.style.cssText = 'font-size:22px;font-weight:bold;color:#ffcc00';
-    // Bottom-left: health.
-    const bl = el('div', 'hud-bl', this.root);
-    bl.style.cssText = 'position:absolute;bottom:14px;left:12px;width:220px;text-shadow:0 1px 3px #000';
-    el('div', null, bl, 'HEALTH').style.cssText = 'font-size:12px;letter-spacing:2px';
-    this.healthBar = el('div', 'hud-health', bl);
-    this.healthBar.style.cssText = 'height:14px;background:#333;border:1px solid #fff;margin-top:2px';
-    this.healthFill = el('div', 'hud-health-fill', this.healthBar);
-    this.healthFill.style.cssText = 'height:100%;width:100%;background:#4caf50';
-    this.ammoEl = el('div', 'hud-ammo', bl, '');
-    this.ammoEl.style.cssText = 'font-size:15px;margin-top:4px';
-    // Bottom-right: speed + controls hint.
-    const br = el('div', 'hud-br', this.root);
-    br.style.cssText = 'position:absolute;bottom:14px;right:12px;text-align:right;text-shadow:0 1px 3px #000';
-    this.speedEl = el('div', 'hud-speed', br, '');
-    this.speedEl.style.cssText = 'font-size:24px;font-weight:bold';
-    this.hintEl = el('div', 'hud-hint', br, 'WASD move · E car · F punch · Click shoot · R reload · M mute · Esc pause');
-    this.hintEl.style.cssText = 'font-size:12px;color:#ddd;margin-top:4px';
-    // Centre flash message.
-    this.flashEl = el('div', 'hud-flash', this.root, '');
-    this.flashEl.style.cssText = 'position:absolute;top:32%;left:50%;transform:translateX(-50%);font-size:28px;font-weight:bold;text-shadow:0 2px 6px #000;text-align:center;display:none';
-    this.flashTimer = 0;
-    // Mission card overlay.
-    this.card = el('div', 'mission-card', this.root);
-    this.card.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(10,14,20,.92);border:2px solid #ffcc00;border-radius:10px;padding:24px 28px;width:420px;pointer-events:auto;display:none;text-align:center';
-    this.cardTitle = el('h2', null, this.card, '');
-    this.cardTitle.style.cssText = 'margin:0 0 8px;color:#ffcc00';
-    this.cardDesc = el('p', null, this.card, '');
-    this.cardDesc.style.cssText = 'margin:0 0 12px;line-height:1.5;color:#eee';
-    this.cardPay = el('div', null, this.card, '');
-    this.cardPay.style.cssText = 'font-size:20px;font-weight:bold;color:#7dff8a;margin-bottom:16px';
-    this.goBtn = el('button', null, this.card, 'GO ▶');
-    this.goBtn.style.cssText = 'font-size:20px;padding:10px 36px;background:#ffcc00;border:none;border-radius:6px;cursor:pointer;font-weight:bold';
-    this.goBtn.addEventListener('click', () => handlers.onGo());
-    // Splash overlay (mission complete / failed / busted / wasted).
-    this.splash = el('div', 'splash', this.root);
-    this.splash.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(10,14,20,.92);border:2px solid #fff;border-radius:10px;padding:24px 32px;width:420px;pointer-events:auto;display:none;text-align:center';
-    this.splashTitle = el('h2', null, this.splash, '');
-    this.splashTitle.style.cssText = 'margin:0 0 8px';
-    this.splashBody = el('p', null, this.splash, '');
-    this.splashBody.style.cssText = 'margin:0 0 16px;line-height:1.5;color:#eee';
-    this.splashBtn = el('button', null, this.splash, 'Continue');
-    this.splashBtn.style.cssText = 'font-size:18px;padding:10px 28px;background:#ffcc00;border:none;border-radius:6px;cursor:pointer;font-weight:bold';
-    this.splashBtn.addEventListener('click', () => handlers.onSplash());
-    // Title screen.
-    this.title = el('div', 'title-screen', this.root);
-    this.title.style.cssText = 'position:absolute;inset:0;background:linear-gradient(160deg,rgba(10,26,46,.88) 0%,rgba(18,58,94,.82) 45%,rgba(200,106,42,.82) 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;text-align:center';
-    el('h1', null, this.title, 'SOLMAR HEAT').style.cssText = 'font-size:64px;margin:0;letter-spacing:6px;color:#ffcc00;text-shadow:0 4px 0 #7a3a00';
-    el('p', null, this.title, 'An open-world crime game in Solmar Bay').style.cssText = 'font-size:20px;margin:8px 0 24px;color:#fff';
-    this.newBtn = el('button', null, this.title, '▶  New Game');
-    this.newBtn.style.cssText = 'font-size:22px;padding:12px 40px;margin:6px;background:#ffcc00;border:none;border-radius:8px;cursor:pointer;font-weight:bold';
-    this.newBtn.addEventListener('click', () => handlers.onNewGame());
-    this.continueBtn = el('button', null, this.title, 'Continue');
-    this.continueBtn.style.cssText = 'font-size:22px;padding:12px 40px;margin:6px;background:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:bold;display:none';
-    this.continueBtn.addEventListener('click', () => handlers.onContinue());
-    const controls = el('div', null, this.title, 'WASD move / drive · E steal or exit car · Space handbrake · F punch · Click pistol · R reload · Shift run · M mute · Esc pause');
-    controls.style.cssText = 'margin-top:26px;font-size:14px;color:#ddd;max-width:520px;line-height:1.6';
-    // Pause overlay.
-    this.pause = el('div', 'pause-screen', this.root);
-    this.pause.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.7);display:none;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto';
-    el('h1', null, this.pause, 'PAUSED').style.cssText = 'font-size:48px;color:#fff;margin:0 0 16px';
-    this.resumeBtn = el('button', null, this.pause, 'Resume');
-    this.resumeBtn.style.cssText = 'font-size:20px;padding:10px 32px;background:#ffcc00;border:none;border-radius:6px;cursor:pointer;font-weight:bold';
-    this.resumeBtn.addEventListener('click', () => handlers.onResume());
+  constructor(doc) {
+    this.doc = doc;
+    this.el = (id) => doc.getElementById(id);
+    this.starsEl = this.el('stars');
+    this.cashEl = this.el('cash');
+    this.debtEl = this.el('debt');
+    this.healthFill = this.el('health-fill');
+    this.speedEl = this.el('speed');
+    this.ammoEl = this.el('ammo');
+    this.minimap = this.el('minimap');
+    this.mm = this.minimap.getContext('2d');
+    this.card = this.el('mission-card');
+    this.cardTitle = this.el('mission-title');
+    this.cardObjective = this.el('mission-objective');
+    this.cardReward = this.el('mission-reward');
+    this.msgEl = this.el('message');
+    this.arrowEl = this.el('objective-arrow');
+    this.timerEl = this.el('timer');
+    this.crosshair = this.el('crosshair');
+    this._msgT = null;
   }
 
-  flash(text) {
-    this.flashEl.textContent = text;
-    this.flashEl.style.display = 'block';
-    this.flashTimer = 2.6;
+  // ---- screens ----
+  showTitle(save) {
+    this._showOnly('title-screen');
+    this.el('btn-continue').style.display = save ? 'block' : 'none';
+    this.el('save-info').textContent = save
+      ? `Save found — cash $${save.cash}, mission ${Math.min(save.missionIndex + 1, 5)} of 5`
+      : 'No save yet — start a new game.';
   }
-  setObjective(text) {
-    this.objectiveEl.textContent = text;
+
+  showPlaying() {
+    this._showOnly(null);
   }
-  setTimer(n) {
-    this.timerEl.textContent = n > 0 ? `⏱ ${n}s` : '';
-  }
-  showMissionCard(title, desc, pay) {
-    this.cardTitle.textContent = title;
-    this.cardDesc.textContent = desc;
-    this.cardPay.textContent = pay > 0 ? `Pay: $${pay}` : '';
-    this.card.style.display = 'block';
-  }
-  hideMissionCard() {
-    this.card.style.display = 'none';
-  }
-  showMissionComplete(title, pay, debtLeft) {
-    this.splashTitle.textContent = 'MISSION COMPLETE';
-    this.splashTitle.style.color = '#7dff8a';
-    this.splashBody.textContent = `${title} — +$${pay}. Debt left: $${debtLeft}.`;
-    this.splashBtn.textContent = 'Continue';
-    this.splash.style.display = 'block';
-  }
-  showMissionFailed(reason) {
-    this.splashTitle.textContent = 'MISSION FAILED';
-    this.splashTitle.style.color = '#ff6666';
-    this.splashBody.textContent = reason;
-    this.splashBtn.textContent = 'Try again';
-    this.splash.style.display = 'block';
-  }
-  showBusted(fine) {
-    this.splashTitle.textContent = 'BUSTED!';
-    this.splashTitle.style.color = '#ff6666';
-    this.splashBody.textContent = `The cops got you. Fine: $${fine}. You wake up at Solmar General.`;
-    this.splashBtn.textContent = 'Continue';
-    this.splash.style.display = 'block';
-  }
-  showWasted() {
-    this.splashTitle.textContent = 'WASTED';
-    this.splashTitle.style.color = '#ff6666';
-    this.splashBody.textContent = 'You got taken down. The docs at Solmar General patch you up — minus $100.';
-    this.splashBtn.textContent = 'Continue';
-    this.splash.style.display = 'block';
-  }
-  hideSplash() {
-    this.splash.style.display = 'none';
-  }
-  showTitle(hasSave) {
-    this.title.style.display = 'flex';
-    this.continueBtn.style.display = hasSave ? 'block' : 'none';
-  }
-  hideTitle() {
-    this.title.style.display = 'none';
-  }
+
   showPause() {
-    this.pause.style.display = 'flex';
-  }
-  hidePause() {
-    this.pause.style.display = 'none';
+    this._showOnly('pause-screen');
   }
 
-  update(dt, ctx) {
-    if (this.flashTimer > 0) {
-      this.flashTimer -= dt;
-      if (this.flashTimer <= 0) this.flashEl.style.display = 'none';
+  showBusted() {
+    this._showOnly('busted-screen');
+  }
+
+  showMissionComplete(mission, reward) {
+    this._showOnly('mission-complete');
+    this.el('mc-title').textContent = `${mission.title} — complete!`;
+    this.el('mc-reward').textContent = `+$${reward}`;
+  }
+
+  showStoryDone() {
+    this._showOnly('mission-complete');
+    this.el('mc-title').textContent = 'Debt paid! Rocco Vane is off your back.';
+    this.el('mc-reward').textContent = 'Free roam — side jobs pay cash';
+  }
+
+  _showOnly(id) {
+    for (const s of ['title-screen', 'pause-screen', 'busted-screen', 'mission-complete']) {
+      this.el(s).classList.toggle('hidden', s !== id);
     }
-    this.cashEl.textContent = `$${ctx.cash}`;
-    this.debtEl.textContent = ctx.missions.debtLeft() > 0 ? `Debt $${ctx.missions.debtLeft()} (owe Rocco Vane)` : 'DEBT PAID ✓';
-    this.debtEl.style.color = ctx.missions.debtLeft() > 0 ? '#ffb0b0' : '#7dff8a';
+  }
+
+  // ---- mission card ----
+  showMissionCard(mission) {
+    this.card.classList.remove('hidden');
+    this.cardTitle.textContent = `Mission ${mission.id}: ${mission.title}`;
+    this.cardObjective.textContent = mission.briefing;
+    this.cardReward.textContent = `Reward $${mission.reward}`;
+  }
+
+  hideMissionCard() {
+    this.card.classList.add('hidden');
+  }
+
+  // ---- centre toast ----
+  message(text, ms) {
+    this.msgEl.textContent = text;
+    this.msgEl.classList.remove('hidden');
+    if (this._msgT) clearTimeout(this._msgT);
+    this._msgT = setTimeout(() => this.msgEl.classList.add('hidden'), ms || 2600);
+  }
+
+  // ---- per-frame update ----
+  // s: {cash, debtLeft, health, stars, speedKmh, ammo, reloading, inCar,
+  //     objective, marker, player:{x,z,heading}, cops:[{x,z}], px, pz, fx}
+  update(s) {
+    // Wanted stars.
     let stars = '';
-    for (let i = 0; i < CONFIG.maxStars; i++) stars += i < ctx.wanted.stars ? '★' : '☆';
+    for (let i = 0; i < CONFIG.maxStars; i++) stars += i < s.stars ? '★' : '☆';
     this.starsEl.textContent = stars;
-    this.starsEl.style.color = ctx.wanted.stars > 0 ? '#ffcc00' : 'rgba(255,255,255,.55)';
-    const hp = Math.max(0, ctx.player.health);
-    this.healthFill.style.width = `${hp}%`;
-    this.healthFill.style.background = hp > 50 ? '#4caf50' : hp > 25 ? '#ff9800' : '#f44336';
-    this.ammoEl.textContent = ctx.player.onFoot
-      ? `Pistol ${ctx.player.mag}/${ctx.player.reserve}  ·  Fists ready`
-      : 'In car — Space = handbrake';
-    this.speedEl.textContent = ctx.player.onFoot ? '' : `${Math.round(Math.abs(ctx.player.carSpeed) * 3.6)} km/h`;
-    this.drawMinimap(ctx);
+    this.starsEl.classList.toggle('hot', s.stars > 0);
+    this.cashEl.textContent = `$${s.cash}`;
+    this.debtEl.textContent = s.debtLeft > 0 ? `Debt: $${s.debtLeft}` : 'Debt paid!';
+    this.healthFill.style.width = `${Math.max(0, s.health)}%`;
+    this.healthFill.style.background = s.health > 50 ? '#58c96b' : s.health > 25 ? '#f7c948' : '#e84a4a';
+    this.speedEl.textContent = s.inCar ? `${Math.round(s.speedKmh)} km/h` : '';
+    this.ammoEl.textContent = s.inCar ? '' : (s.reloading ? 'RELOADING…' : `Pistol ${s.ammo}/${CONFIG.pistolAmmo}`);
+    this.crosshair.style.display = s.inCar ? 'none' : 'block';
+    this.cardObjective.textContent = s.objective || '';
+    // Timer (mission 2).
+    if (s.timer && s.timer > 0) {
+      this.timerEl.textContent = `${Math.ceil(s.timer)}s`;
+      this.timerEl.classList.remove('hidden');
+    } else {
+      this.timerEl.classList.add('hidden');
+    }
+    // Objective arrow: rotate toward the marker relative to the camera.
+    if (s.marker) {
+      const dx = s.marker.x - s.player.x;
+      const dz = s.marker.z - s.player.z;
+      const bearing = Math.atan2(dx, dz);
+      const rel = bearing - s.player.camHeading;
+      this.arrowEl.style.display = 'block';
+      this.arrowEl.style.transform = `translateX(-50%) rotate(${rel}rad)`;
+      const dist = Math.hypot(dx, dz);
+      this.arrowEl.textContent = `▲ ${Math.round(dist)}m`;
+    } else {
+      this.arrowEl.style.display = 'none';
+    }
+    this._drawMinimap(s);
   }
 
-  drawMinimap(ctx) {
-    const c = this.map.getContext('2d');
-    const W = 180;
-    const H = 180;
-    const scale = W / 420;
-    const toX = (x) => (x + 210) * scale;
-    const toY = (z) => (z + 210) * scale;
-    c.fillStyle = '#20242a';
-    c.fillRect(0, 0, W, H);
-    // Water + beach.
-    c.fillStyle = '#2e7fa8';
-    c.fillRect(0, toY(CONFIG.waterZ), W, H - toY(CONFIG.waterZ));
+  _drawMinimap(s) {
+    const c = this.mm;
+    const W = this.minimap.width;
+    const H = this.minimap.height;
+    const half = CONFIG.cityHalf + 30;
+    const toX = (x) => ((x + half) / (half * 2)) * W;
+    const toY = (z) => ((z + half) / (half * 2)) * H;
+    c.clearRect(0, 0, W, H);
+    // Sea + sand (south edge).
+    c.fillStyle = '#2f7fb8';
+    c.fillRect(0, toY(CONFIG.cityHalf), W, H - toY(CONFIG.cityHalf));
     c.fillStyle = '#e8d29a';
-    c.fillRect(0, toY(CONFIG.beachZ), W, toY(CONFIG.waterZ) - toY(CONFIG.beachZ));
+    c.fillRect(0, toY(CONFIG.cityHalf - 2), W, toY(CONFIG.cityHalf) - toY(CONFIG.cityHalf - 2));
+    // Ground.
+    c.fillStyle = '#3a3f46';
+    c.fillRect(0, 0, W, toY(CONFIG.cityHalf));
     // Roads.
-    c.strokeStyle = '#555a60';
+    c.strokeStyle = '#565b64';
     c.lineWidth = 5;
-    for (const s of CONFIG.streets) {
+    for (const line of CONFIG.streetLines) {
       c.beginPath();
-      c.moveTo(toX(-150), toY(s));
-      c.lineTo(toX(150), toY(s));
+      c.moveTo(toX(line), 0);
+      c.lineTo(toX(line), toY(CONFIG.cityHalf));
       c.stroke();
       c.beginPath();
-      c.moveTo(toX(s), toY(-150));
-      c.lineTo(toX(s), toY(150));
+      c.moveTo(0, toY(line));
+      c.lineTo(W, toY(line));
       c.stroke();
     }
-    // Buildings.
-    c.fillStyle = '#8a8f96';
-    for (const b of ctx.city.colliders) {
-      c.fillRect(toX(b.minX), toY(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
-    }
-    // Objective.
-    if (ctx.missions.objective) {
-      const o = ctx.missions.objective;
-      c.fillStyle = '#ffcc00';
+    // Mission marker.
+    if (s.marker) {
+      const pulse = 6 + Math.sin(performance.now() / 250) * 2;
+      c.fillStyle = '#f7c948';
       c.beginPath();
-      c.moveTo(toX(o.x), toY(o.z) - 7);
-      c.lineTo(toX(o.x) + 6, toY(o.z));
-      c.lineTo(toX(o.x), toY(o.z) + 7);
-      c.lineTo(toX(o.x) - 6, toY(o.z));
-      c.closePath();
+      c.arc(toX(s.marker.x), toY(s.marker.z), pulse, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#fff';
+      c.lineWidth = 1.5;
+      c.stroke();
+    }
+    // Cops.
+    c.fillStyle = '#ff4a4a';
+    for (const cop of s.cops || []) {
+      c.beginPath();
+      c.arc(toX(cop.x), toY(cop.z), 3, 0, Math.PI * 2);
       c.fill();
     }
-    // Police.
-    c.fillStyle = '#4488ff';
-    for (const car of ctx.vehicles.policeCars) {
-      c.beginPath();
-      c.arc(toX(car.mesh.position.x), toY(car.mesh.position.z), 3.5, 0, Math.PI * 2);
-      c.fill();
-    }
-    // Player.
-    const p = ctx.player.pos;
-    c.fillStyle = '#7dff8a';
+    // Player arrow.
+    const px = toX(s.player.x);
+    const py = toY(s.player.z);
+    c.save();
+    c.translate(px, py);
+    c.rotate(-s.player.heading + Math.PI);
+    c.fillStyle = '#fff';
     c.beginPath();
-    c.arc(toX(p.x), toY(p.z), 4, 0, Math.PI * 2);
+    c.moveTo(0, -7);
+    c.lineTo(5, 6);
+    c.lineTo(-5, 6);
+    c.closePath();
     c.fill();
-    c.strokeStyle = '#7dff8a';
-    c.lineWidth = 2;
-    c.beginPath();
-    c.moveTo(toX(p.x), toY(p.z));
-    c.lineTo(toX(p.x) + Math.sin(ctx.player.heading) * 9, toY(p.z) + Math.cos(ctx.player.heading) * 9);
-    c.stroke();
+    c.restore();
   }
 }

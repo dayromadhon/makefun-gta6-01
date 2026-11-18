@@ -1,382 +1,242 @@
-// missions.js — 5 story missions for Leo Marin, then side jobs in free roam.
-import { CONFIG } from './config.js';
+// SOLMAR HEAT — missions.js
+// One job: the story. Five missions for Leo to pay off his $4,500 debt to
+// Rocco Vane, then side jobs in free roam. A mission is a small state machine:
+// stages, an objective marker, a timer where the story needs one.
 
-const STORY = [
-  {
-    title: 'Mission 1 — First Wheels',
-    desc: 'Leo owes Rocco Vane $4,500. Ada lined up a car to steal. Take any car and bring it to her garage.',
-    pay: 400,
-  },
-  {
-    title: 'Mission 2 — Package Run',
-    desc: 'Pick up the package at the marina and deliver it to Hotel Solmar. 90 seconds on the clock.',
-    pay: 600,
-  },
-  {
-    title: 'Mission 3 — Lose the Heat',
-    desc: 'The cops are on you — 2 stars. Reach Solmar Pier and lay low until the heat dies down.',
-    pay: 800,
-  },
-  {
-    title: 'Mission 4 — Night Shift',
-    desc: 'Drive a taxi and run 3 fares across the city. Pick up, drop off, get paid.',
-    pay: 900,
-  },
-  {
-    title: 'Mission 5 — The Big Score',
-    desc: 'Steal the courier van from the marina and bring it to the hideout. This one pays the debt.',
-    pay: 2000,
-  },
-];
+import { CONFIG, MISSIONS, LANDMARKS } from './config.js';
+import { range, pick } from './random.js';
 
 export class Missions {
-  constructor(scene, city, vehicles, rng) {
-    this.scene = scene;
-    this.city = city;
-    this.vehicles = vehicles;
+  constructor(rng, onEvent) {
     this.rng = rng;
-    this.index = 0; // 0..4 story, 5 = story done (side jobs)
+    this.onEvent = onEvent; // ({type, ...}) — 'card', 'stage', 'complete', 'failed', 'cash'
+    this.index = 0; // 0..4 story, 5 = story done (free roam)
     this.stage = 0;
-    this.active = false; // started with Go
-    this.cardShown = false;
-    this.earned = 0;
     this.timer = 0;
     this.faresDone = 0;
-    this.fareStage = 'pickup'; // pickup | dropoff
-    this.farePoint = null;
-    this.sideJob = null; // {kind:'taxi'|'package', stage, point, timer}
-    this.sideJobsDone = 0;
-    this.van = null;
-    this.taxiCar = null;
-    this.objective = null;
-    // 3D beacon at the objective.
-    this.beacon = new THREE.Group();
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.2, 1.2, 40, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false })
-    );
-    pillar.position.y = 20;
-    this.beacon.add(pillar);
-    const marker = new THREE.Mesh(
-      new THREE.OctahedronGeometry(1.1),
-      new THREE.MeshBasicMaterial({ color: 0xffcc00 })
-    );
-    marker.position.y = 6;
-    this.beacon.add(marker);
-    this.beacon.userData.marker = marker;
-    this.beacon.visible = false;
-    this.scene.add(this.beacon);
-    this.time = 0;
+    this.marker = null; // {x, z, label}
+    this.fare = null; // current taxi fare {from:{x,z}, to:{x,z}, stage}
+    this.sideJob = null; // free-roam job {kind, from, to, stage}
+    this._taxiSpawned = false;
+    this._vanSpawned = false;
   }
 
-  debtLeft() {
-    return Math.max(0, CONFIG.debtStart - this.earned);
+  get current() {
+    return MISSIONS[this.index] || null;
   }
 
-  currentTitle() {
-    if (this.index < 5) return STORY[this.index].title;
-    return 'Free Roam — Side Jobs';
+  get storyDone() {
+    return this.index >= MISSIONS.length;
   }
 
-  currentDesc() {
-    if (this.index < 5) return STORY[this.index].desc;
-    return 'Debt paid. The city is yours — run taxi fares and package jobs for cash.';
-  }
-
-  setObjective(x, z, label) {
-    this.objective = { x, z, label };
-    this.beacon.position.set(x, 0, z);
-    this.beacon.visible = true;
-  }
-
-  clearObjective() {
-    this.objective = null;
-    this.beacon.visible = false;
-  }
-
-  // Show the mission card for the current mission (called by main on New Game / after completion).
-  showCard(ctx) {
-    this.cardShown = true;
-    this.active = false;
-    ctx.hud.showMissionCard(this.currentTitle(), this.currentDesc(), this.index < 5 ? STORY[this.index].pay : 0);
-  }
-
-  // Player pressed Go on the card.
-  begin(ctx) {
-    this.cardShown = false;
-    this.active = true;
+  // Begin (or re-begin) the current mission.
+  start() {
+    const m = this.current;
+    if (!m) {
+      this._startSideJob();
+      return;
+    }
     this.stage = 0;
-    ctx.hud.hideMissionCard();
-    this.setupStage(ctx);
-    ctx.audio.chime();
-    ctx.hud.flash(this.currentTitle());
+    this.timer = 0;
+    this.faresDone = 0;
+    this.fare = null;
+    this._taxiSpawned = false;
+    this._vanSpawned = false;
+    this.onEvent({ type: 'card', mission: m });
+    this._setMarkerForStage();
   }
 
-  setupStage(ctx) {
-    const places = this.city.places;
-    if (this.index === 0) {
-      // Stage 0: steal any car. Objective: nearest parked car to the
-      // player (Ada's lined-up car is a short walk west of the spawn).
-      let car = null;
-      let bestD = 1e9;
-      for (const c of this.vehicles.parked) {
-        if (c.stolen) continue;
-        const d = Math.hypot(c.mesh.position.x - ctx.player.pos.x, c.mesh.position.z - ctx.player.pos.z);
-        if (d < bestD) {
-          bestD = d;
-          car = c;
-        }
-      }
-      if (!car) car = this.vehicles.parked[0];
-      this.setObjective(car.mesh.position.x, car.mesh.position.z, 'Steal a car');
-      ctx.hud.setObjective('Steal a car (press E near one)');
-    } else if (this.index === 1) {
-      this.setObjective(places.marina.x, places.marina.z, 'Pick up the package');
-      ctx.hud.setObjective('Pick up the package at the marina');
-    } else if (this.index === 2) {
-      ctx.wanted.setStars(2);
-      this.setObjective(places.pier.x, places.pier.z, 'Reach Solmar Pier');
-      ctx.hud.setObjective('Reach the pier — lose the heat');
-    } else if (this.index === 3) {
-      this.faresDone = 0;
-      this.fareStage = 'pickup';
-      // Nearest taxi as the work car.
-      let best = null;
-      let bestD = 1e9;
-      for (const car of this.vehicles.traffic) {
-        if (car.kind !== 'taxi') continue;
-        const d = Math.hypot(car.mesh.position.x - ctx.player.pos.x, car.mesh.position.z - ctx.player.pos.z);
-        if (d < bestD) {
-          bestD = d;
-          best = car;
-        }
-      }
-      this.taxiCar = best;
-      if (best) this.setObjective(best.mesh.position.x, best.mesh.position.z, 'Get in the taxi');
-      ctx.hud.setObjective('Get in a taxi');
-    } else if (this.index === 4) {
-      // Spawn the courier van at the marina.
-      const mesh = this.makeVanMesh();
-      mesh.position.set(places.marina.x + 6, 0, places.marina.z + 6);
-      this.scene.add(mesh);
-      this.van = { mesh, kind: 'van', speed: 0, stolen: false, isVan: true };
-      this.vehicles.traffic.push(this.van);
-      this.setObjective(places.marina.x + 6, places.marina.z + 6, 'Steal the courier van');
-      ctx.hud.setObjective('Steal the courier van');
-    } else {
-      this.startSideJob(ctx);
+  _setMarkerForStage() {
+    const m = this.current;
+    if (!m) return;
+    if (m.kind === 'steal-to-garage') {
+      this.marker = this.stage === 0 ? null : { x: LANDMARKS.garage.x, z: LANDMARKS.garage.z, label: LANDMARKS.garage.name };
+    } else if (m.kind === 'timed-delivery') {
+      this.marker = this.stage === 0
+        ? { x: LANDMARKS.marina.x, z: LANDMARKS.marina.z, label: LANDMARKS.marina.name }
+        : { x: LANDMARKS.hotel.x, z: LANDMARKS.hotel.z, label: LANDMARKS.hotel.name };
+    } else if (m.kind === 'lose-heat') {
+      this.marker = this.stage === 0 ? null : { x: LANDMARKS.pier.x, z: LANDMARKS.pier.z, label: LANDMARKS.pier.name };
+    } else if (m.kind === 'taxi') {
+      this.marker = this.fare
+        ? (this.fare.stage === 0
+          ? { x: this.fare.from.x, z: this.fare.from.z, label: 'Pick up the fare' }
+          : { x: this.fare.to.x, z: this.fare.to.z, label: 'Drop off the fare' })
+        : null;
+    } else if (m.kind === 'van-heist') {
+      this.marker = this.stage === 0 ? { x: LANDMARKS.docks.x, z: LANDMARKS.docks.z, label: 'Courier van' } : { x: LANDMARKS.hideout.x, z: LANDMARKS.hideout.z, label: LANDMARKS.hideout.name };
     }
   }
 
-  makeVanMesh() {
-    const g = new THREE.Group();
-    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d8 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 5.6), bodyMat);
-    body.position.y = 1.1;
-    body.castShadow = true;
-    g.add(body);
-    const cab = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 0.9, 1.4),
-      new THREE.MeshLambertMaterial({ color: 0x3355aa })
-    );
-    cab.position.set(0, 0.8, 2.4);
-    g.add(cab);
-    const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 10);
-    wheelGeo.rotateZ(Math.PI / 2);
-    const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    for (const [wx, wz] of [[-1, 1.8], [1, 1.8], [-1, -1.8], [1, -1.8]]) {
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.position.set(wx, 0.45, wz);
-      g.add(w);
+  objectiveText() {
+    const m = this.current;
+    if (!m) {
+      if (this.sideJob) return this.sideJob.stage === 0 ? 'Pick up the package' : 'Deliver the package';
+      return 'Free roam — drive to the side-job marker to earn cash';
     }
-    return g;
+    if (m.kind === 'steal-to-garage') return this.stage === 0 ? 'Steal any car (E near a car)' : 'Drive it to Ada\u2019s garage';
+    if (m.kind === 'timed-delivery') return this.stage === 0 ? 'Pick up the package at the marina' : `Deliver to Hotel Solmar — ${Math.ceil(this.timer)}s left`;
+    if (m.kind === 'lose-heat') return this.stage === 0 ? 'Lose the 2-star wanted level' : 'Reach the pier';
+    if (m.kind === 'taxi') return `Taxi fares: ${this.faresDone}/${m.fares} done` + (this.fare ? (this.fare.stage === 0 ? ' — pick up the fare' : ' — drop off the fare') : ' — get in the taxi');
+    if (m.kind === 'van-heist') return this.stage === 0 ? 'Steal the courier van at the docks' : 'Bring the van to the hideout';
+    return m.objective;
   }
 
-  randomStreetPoint() {
-    const s = this.rng.pick(CONFIG.streets);
-    const along = this.rng.range(-130, 130);
-    return this.rng.chance(0.5) ? { x: s + this.rng.pick([-8, 8]), z: along } : { x: along, z: s + this.rng.pick([-8, 8]) };
+  // A random street point for fares and side jobs.
+  _streetSpot(lines, half) {
+    const line = lines[Math.floor(this.rng() * lines.length)];
+    const along = range(this.rng, -half + 10, half - 10);
+    return this.rng() < 0.5 ? { x: along, z: line } : { x: line, z: along };
   }
 
-  startSideJob(ctx) {
-    const kind = this.rng.chance(0.5) ? 'taxi' : 'package';
-    this.sideJob = { kind, stage: 'pickup', point: this.randomStreetPoint(), timer: 0 };
-    if (kind === 'taxi') {
-      this.setObjective(this.sideJob.point.x, this.sideJob.point.z, 'Taxi fare: pick up');
-      ctx.hud.setObjective('Side job: pick up the taxi fare');
-    } else {
-      this.setObjective(this.sideJob.point.x, this.sideJob.point.z, 'Package pickup');
-      ctx.hud.setObjective('Side job: pick up the package');
-    }
+  _newFare(lines, half) {
+    const from = this._streetSpot(lines, half);
+    let to = this._streetSpot(lines, half);
+    while (Math.hypot(to.x - from.x, to.z - from.z) < 60) to = this._streetSpot(lines, half);
+    this.fare = { from, to, stage: 0 };
+    this._setMarkerForStage();
   }
 
-  onCarStolen(car, ctx) {
-    if (!this.active) return;
-    if (this.index === 0 && this.stage === 0) {
-      this.stage = 1;
-      const g = this.city.places.garage;
-      this.setObjective(g.x, g.z, "Ada's Garage");
-      ctx.hud.setObjective("Drive it to Ada's Garage");
-      ctx.hud.flash('Got wheels — now bring it to the garage');
-    } else if (this.index === 3 && this.stage === 0 && car.kind === 'taxi') {
-      this.stage = 1;
-      this.farePoint = this.randomStreetPoint();
-      this.fareStage = 'pickup';
-      this.setObjective(this.farePoint.x, this.farePoint.z, 'Fare pickup');
-      ctx.hud.setObjective('Pick up fare 1 of 3');
-    } else if (this.index === 4 && this.stage === 0 && car.isVan) {
-      this.stage = 1;
-      ctx.wanted.addStars(2, 'van-steal');
-      const h = this.city.places.hideout;
-      this.setObjective(h.x, h.z, 'Hideout');
-      ctx.hud.setObjective('Bring the van to the hideout');
-      ctx.hud.flash('The van is yours — run!');
-    }
-  }
-
-  onDriveTick(car, ctx) {
-    if (!this.active || !this.objective) return;
-    const p = ctx.player.pos;
-    const d = Math.hypot(p.x - this.objective.x, p.z - this.objective.z);
-    if (d < 7) this.arrived(ctx);
-  }
-
-  arrived(ctx) {
-    if (this.index === 0 && this.stage === 1) {
-      this.completeMission(ctx);
-    } else if (this.index === 1) {
-      if (this.stage === 0) {
-        this.stage = 1;
-        this.timer = CONFIG.packageTimeLimit;
-        const h = this.city.places.hotel;
-        this.setObjective(h.x, h.z, 'Hotel Solmar');
-        ctx.hud.setObjective('Deliver to Hotel Solmar — 90s!');
-        ctx.audio.chime();
-      } else {
-        this.completeMission(ctx);
-      }
-    } else if (this.index === 2 && this.stage === 0) {
-      this.stage = 1;
-      this.timer = CONFIG.heatSurviveSeconds;
-      this.clearObjective();
-      ctx.hud.setObjective('Lay low — survive 12s');
-      ctx.hud.flash('Lay low at the pier...');
-    } else if (this.index === 3 && this.stage === 1) {
-      if (this.fareStage === 'pickup') {
-        this.fareStage = 'dropoff';
-        this.farePoint = this.randomStreetPoint();
-        this.setObjective(this.farePoint.x, this.farePoint.z, 'Fare drop-off');
-        ctx.hud.setObjective(`Drop off fare ${this.faresDone + 1} of 3`);
-        ctx.audio.chime();
-      } else {
-        this.faresDone++;
-        ctx.cash += CONFIG.taxiFare;
-        ctx.hud.flash(`Fare done +$${CONFIG.taxiFare}`);
-        ctx.audio.chime();
-        if (this.faresDone >= CONFIG.taxiFaresNeeded) {
-          this.completeMission(ctx);
-        } else {
-          this.fareStage = 'pickup';
-          this.farePoint = this.randomStreetPoint();
-          this.setObjective(this.farePoint.x, this.farePoint.z, 'Fare pickup');
-          ctx.hud.setObjective(`Pick up fare ${this.faresDone + 1} of 3`);
-        }
-      }
-    } else if (this.index === 4 && this.stage === 1) {
-      this.completeMission(ctx);
-    } else if (this.index >= 5 && this.sideJob) {
-      if (this.sideJob.stage === 'pickup') {
-        this.sideJob.stage = 'dropoff';
-        this.sideJob.point = this.randomStreetPoint();
-        this.setObjective(this.sideJob.point.x, this.sideJob.point.z, 'Drop-off');
-        ctx.hud.setObjective(this.sideJob.kind === 'taxi' ? 'Drop off the fare' : 'Deliver the package');
-        ctx.audio.chime();
-      } else {
-        const pay = this.sideJob.kind === 'taxi' ? CONFIG.taxiFare : CONFIG.packagePay;
-        ctx.cash += pay;
-        this.earned += pay;
-        this.sideJobsDone++;
-        ctx.hud.flash(`Side job done +$${pay}`);
-        ctx.audio.jingle();
-        this.startSideJob(ctx);
-      }
-    }
-  }
-
-  completeMission(ctx) {
-    const pay = STORY[this.index].pay;
-    ctx.cash += pay;
-    this.earned += pay;
-    ctx.audio.jingle();
-    ctx.hud.showMissionComplete(this.currentTitle(), pay, this.debtLeft());
-    this.clearObjective();
-    this.active = false;
-    this.index++;
+  _complete(ctx) {
+    const m = this.current;
+    const reward = m.reward;
+    // Advance the index BEFORE the event: the event handler saves the game,
+    // and the save must carry the NEXT mission, not the one just finished.
+    this.index += 1;
     this.stage = 0;
-    if (this.index === 5) {
-      ctx.hud.flash('DEBT PAID — Solmar Bay is yours now');
+    this.marker = null;
+    this.fare = null;
+    this.onEvent({ type: 'complete', mission: m, reward });
+    if (this.storyDone) {
+      this.onEvent({ type: 'story-done', debtPaid: true });
+      this._startSideJob();
     }
-    ctx.onMissionComplete();
   }
 
-  failMission(ctx, reason) {
-    ctx.audio.blip(180);
-    ctx.hud.showMissionFailed(reason);
-    this.clearObjective();
-    this.active = false;
-    this.stage = 0;
-    ctx.wanted.clear();
-    ctx.onMissionFailed();
+  _startSideJob() {
+    this.sideJob = null;
+    // The next side job marker appears at a street point; the game renders it.
+    this.sideJob = { kind: 'package', stage: 0, from: null, to: null };
+    this.marker = null;
   }
 
+  // Free-roam side job: drive to the marker to pick up, then deliver.
+  startSideJobAt(ctx) {
+    if (!this.storyDone || !this.sideJob) return;
+    const lines = CONFIG.streetLines;
+    const half = CONFIG.cityHalf;
+    this.sideJob.from = this._streetSpot(lines, half);
+    this.sideJob.to = this._streetSpot(lines, half);
+    this.sideJob.stage = 0;
+    this.marker = { x: this.sideJob.from.x, z: this.sideJob.from.z, label: 'Package pickup' };
+    this.onEvent({ type: 'stage', text: 'Side job: pick up the package' });
+  }
+
+  // One frame. ctx: {player, vehicles, wanted, lines, half}.
+  // Returns nothing; progress is reported through onEvent.
   update(dt, ctx) {
-    this.time += dt;
-    if (this.beacon.visible) {
-      this.beacon.userData.marker.position.y = 6 + Math.sin(this.time * 3) * 0.8;
-      this.beacon.userData.marker.rotation.y += dt * 2;
-    }
-    if (!this.active) return;
-    // Timed stages.
-    if (this.index === 1 && this.stage === 1) {
-      this.timer -= dt;
-      ctx.hud.setTimer(Math.max(0, Math.ceil(this.timer)));
-      if (this.timer <= 0) {
-        ctx.hud.setTimer(0);
-        this.failMission(ctx, 'Too slow — the package run failed. Try again.');
-        return;
+    const m = this.current;
+    const p = ctx.player;
+    if (!m) {
+      // Free roam: side-job pickup / delivery.
+      if (this.sideJob && this.sideJob.from) {
+        const target = this.sideJob.stage === 0 ? this.sideJob.from : this.sideJob.to;
+        if (Math.hypot(p.x - target.x, p.z - target.z) < 8) {
+          if (this.sideJob.stage === 0) {
+            this.sideJob.stage = 1;
+            this.marker = { x: this.sideJob.to.x, z: this.sideJob.to.z, label: 'Deliver the package' };
+            this.onEvent({ type: 'stage', text: 'Package collected — deliver it' });
+          } else {
+            this.onEvent({ type: 'cash', amount: CONFIG.packageSidePay, text: `Side job done: +$${CONFIG.packageSidePay}` });
+            this.sideJob = null;
+            this.marker = null;
+            this._startSideJob();
+          }
+        }
       }
+      return;
     }
-    if (this.index === 2 && this.stage === 1) {
-      this.timer -= dt;
-      ctx.hud.setTimer(Math.max(0, Math.ceil(this.timer)));
-      if (this.timer <= 0) {
-        ctx.hud.setTimer(0);
-        ctx.wanted.clear();
-        this.completeMission(ctx);
-        return;
+
+    const near = (x, z, r) => Math.hypot(p.x - x, p.z - z) < r;
+
+    if (m.kind === 'steal-to-garage') {
+      if (this.stage === 0 && p.inCar) {
+        this.stage = 1;
+        this._setMarkerForStage();
+        this.onEvent({ type: 'stage', text: 'Car stolen — take it to Ada\u2019s garage' });
+      } else if (this.stage === 1 && p.inCar && near(LANDMARKS.garage.x, LANDMARKS.garage.z, 9)) {
+        this._complete(ctx);
       }
-    }
-    // On-foot arrival (pickups, pier, fares).
-    const p = ctx.player.pos;
-    if (this.objective) {
-      const d = Math.hypot(p.x - this.objective.x, p.z - this.objective.z);
-      if (d < 5 && ctx.player.onFoot) this.arrived(ctx);
-    }
-    // Taxi must be the car for mission 4 fares.
-    if (this.index === 3 && this.stage === 1 && this.taxiCar && ctx.player.car && ctx.player.car !== this.taxiCar) {
-      ctx.hud.setObjective('Get back in the taxi!');
+    } else if (m.kind === 'timed-delivery') {
+      if (this.stage === 0) {
+        if (near(LANDMARKS.marina.x, LANDMARKS.marina.z, 8)) {
+          this.stage = 1;
+          this.timer = m.timeLimit;
+          this._setMarkerForStage();
+          this.onEvent({ type: 'stage', text: 'Package collected — 75 seconds to Hotel Solmar!' });
+        }
+      } else {
+        this.timer -= dt;
+        if (this.timer <= 0) {
+          this.onEvent({ type: 'failed', mission: m, text: 'Out of time — the package run failed. Try again.' });
+          this.start();
+          return;
+        }
+        if (near(LANDMARKS.hotel.x, LANDMARKS.hotel.z, 9)) this._complete(ctx);
+      }
+    } else if (m.kind === 'lose-heat') {
+      if (this.stage === 0 && ctx.wanted.stars === 0) {
+        this.stage = 1;
+        this._setMarkerForStage();
+        this.onEvent({ type: 'stage', text: 'Heat lost — now reach the pier' });
+      } else if (this.stage === 1 && near(LANDMARKS.pier.x, LANDMARKS.pier.z, 9)) {
+        this._complete(ctx);
+      }
+    } else if (m.kind === 'taxi') {
+      if (!this._taxiSpawned) {
+        this._taxiSpawned = true;
+        ctx.spawnTaxiNearPlayer();
+      }
+      if (this.stage === 0 && p.inCar && p.inCar.kind === 'taxi') {
+        this.stage = 1;
+        this._newFare(CONFIG.streetLines, CONFIG.cityHalf);
+        this.onEvent({ type: 'stage', text: 'Taxi ready — pick up your first fare' });
+      } else if (this.stage === 1 && this.fare) {
+        const target = this.fare.stage === 0 ? this.fare.from : this.fare.to;
+        if (p.inCar && p.inCar.kind === 'taxi' && near(target.x, target.z, 7)) {
+          if (this.fare.stage === 0) {
+            this.fare.stage = 1;
+            this._setMarkerForStage();
+            this.onEvent({ type: 'stage', text: 'Fare aboard — drop them off' });
+          } else {
+            this.faresDone += 1;
+            this.onEvent({ type: 'cash', amount: CONFIG.taxiFare, text: `Fare paid: +$${CONFIG.taxiFare}` });
+            if (this.faresDone >= m.fares) {
+              this._complete(ctx);
+            } else {
+              this._newFare(CONFIG.streetLines, CONFIG.cityHalf);
+            }
+          }
+        }
+      }
+    } else if (m.kind === 'van-heist') {
+      if (!this._vanSpawned) {
+        this._vanSpawned = true;
+        ctx.spawnVanAtDocks();
+      }
+      if (this.stage === 0 && p.inCar && p.inCar.kind === 'van') {
+        this.stage = 1;
+        this._setMarkerForStage();
+        this.onEvent({ type: 'stage', text: 'Van stolen — take it to the hideout' });
+      } else if (this.stage === 1 && p.inCar && p.inCar.kind === 'van' && near(LANDMARKS.hideout.x, LANDMARKS.hideout.z, 9)) {
+        this._complete(ctx);
+      }
     }
   }
 
-  saveState() {
-    return { index: this.index, earned: this.earned, sideJobsDone: this.sideJobsDone };
-  }
-
-  loadState(s) {
-    this.index = s.index ?? 0;
-    this.earned = s.earned ?? 0;
-    this.sideJobsDone = s.sideJobsDone ?? 0;
-    this.stage = 0;
-    this.active = false;
+  // Called when the player is busted: the current mission restarts.
+  onBusted() {
+    if (!this.current) return;
+    this.start();
   }
 }

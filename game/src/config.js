@@ -1,90 +1,149 @@
-// config.js — every tuning number for SOLMAR HEAT lives here, one place.
-export const CONFIG = {
-  // World: a 5x5 street grid. Streets run at these centre lines on x and z.
-  // Six streets make 5x5 blocks: block centres sit at -120..120, i.e.
-  // BETWEEN streets, so no building ever stands on a road.
-  blockSize: 46,
-  roadWidth: 14,
-  streetGap: 60,
-  streets: [-150, -90, -30, 30, 90, 150],
-  cityHalf: 150,
-  // Beach (south, +z) and marina (east, +x) sit just past the grid.
-  beachZ: 156,
-  waterZ: 172,
-  marinaX: 156,
-  dockX: 176,
+// SOLMAR HEAT — config.js
+// One job: every tunable number, colour and story constant for the game.
+// Nothing here touches the DOM, the renderer or the network.
 
-  // Player on foot.
+export const CONFIG = {
+  // World: a 5x5 street grid. Streets run at these x/z lines; blocks sit between them.
+  streetLines: [-100, -50, 0, 50, 100],
+  roadHalfWidth: 6,
+  blockHalf: 19, // buildings stay inside blocks, never on a road
+  cityHalf: 112, // playable bounds (beach/marina sit outside this)
+  groundSize: 320,
+
+  // Driving
+  carTopSpeed: 42, // units per second (~150 km/h feel)
+  carAccel: 26,
+  carBrake: 40,
+  carReverseSpeed: 14,
+  carSteer: 1.9, // radians per second at full lock, scaled by speed
+  carGrip: 6.5,
+  handbrakeGrip: 1.6,
+  carEnterRadius: 4.2,
+
+  // On foot
   walkSpeed: 6,
   runSpeed: 10,
-  playerRadius: 0.6,
+  playerRadius: 0.7,
   playerHealth: 100,
 
-  // Cars.
-  carAccel: 14,
-  carBrake: 26,
-  carReverseMax: 8,
-  carMaxSpeed: 34,
-  carTurn: 1.9,
-  handbrakeTurn: 3.4,
-  carRadius: 1.6,
-  trafficSpeed: 9,
-  taxiSpeed: 11,
-  policeSpeed: 38,
-
-  // Wanted.
-  bustDistance: 3.0,
-  bustTime: 2.5,
-  bustFine: 100,
-  wantedDecaySeconds: 30,
-  maxStars: 5,
-
-  // Combat.
+  // Combat
   pistolDamage: 34,
-  pistolMag: 12,
-  pistolReserve: 999,
-  pistolRange: 60,
-  fistDamage: 12,
-  fistRange: 2.2,
-  fistCooldown: 0.45,
+  pistolAmmo: 12,
+  pistolReloadMs: 1400,
+  punchDamage: 18,
+  punchRange: 2.2,
+  punchCooldownMs: 450,
 
-  // Money.
-  debtStart: 4500,
-  missionPay: [400, 600, 800, 900, 2000],
+  // Wanted
+  maxStars: 5,
+  heatPerCarTheft: 1,
+  heatPerPedHit: 1,
+  heatPerShot: 0.5,
+  heatDecayPerSec: 0.05,
+  bustRadius: 3.2,
+  bustHoldSec: 2.5,
+  copSpawnRadius: 55,
+  maxCops: 8,
+
+  // Traffic and pedestrians
+  trafficCount: 14,
+  trafficCountLow: 6,
+  pedCount: 26,
+  pedCountLow: 10,
+  parkedCount: 10,
+
+  // Money
+  debtTotal: 4500,
+  missionRewards: [400, 600, 800, 900, 2000],
   taxiFare: 120,
-  packagePay: 250,
+  packageSidePay: 150,
 
-  // Missions.
-  packageTimeLimit: 90,
-  taxiFaresNeeded: 3,
-  heatSurviveSeconds: 12,
+  // Camera
+  camHeight: 7.5,
+  camDistance: 11,
+  camLookHeight: 2,
 
-  // Save.
-  saveKey: 'solmar-heat-save-v1',
+  // Colours (sun-soaked Solmar Bay palette)
+  colors: {
+    sky: 0x8ec9ee,
+    fog: 0xa8d0e8,
+    sun: 0xfff2d8,
+    road: 0x2e3138,
+    roadLine: 0xf5d76e,
+    sidewalk: 0xb9b3a4,
+    sand: 0xe8d29a,
+    sea: 0x2f7fb8,
+    grass: 0x6fae5e,
+    building: [0xd8c9b0, 0xc9b8a3, 0xb7c4cc, 0xe0b48f, 0xa8b8c4, 0xd9a0a0],
+    glass: 0x2a4a63,
+    player: 0x2e86de,
+    taxi: 0xf7c948,
+    police: 0x1c2733,
+    van: 0xe8e8e8,
+  },
 
-  // Look.
-  skyColor: 0x87bfe8,
-  fogColor: 0xa8c8e0,
-  sunColor: 0xfff2d8,
-  groundColor: 0x9aa08a,
-  roadColor: 0x3a3d42,
-  sidewalkColor: 0xb8b0a0,
-  sandColor: 0xe8d29a,
-  waterColor: 0x2e7fa8,
+  // Story
+  hero: 'Leo Marin',
+  loanShark: 'Rocco Vane',
+  dispatcher: 'Ada Kwan',
 };
 
-// Palette for cars, buildings and people — sun-soaked Solmar Bay.
-export const PALETTE = {
-  cars: [0xc0392b, 0x2980b9, 0xf39c12, 0x27ae60, 0x8e44ad, 0xececec, 0x2c3e50, 0xd35400, 0x16a085],
-  taxi: 0xf1c40f,
-  police: 0x1a1a2e,
-  policeLight: 0xff2222,
-  van: 0xd8d8d8,
-  buildings: [0xd8c8a8, 0xc8b898, 0xb8a888, 0xa8b8c8, 0xc8a8a8, 0x98a8b8],
-  towers: [0x6a7a8a, 0x7a8a9a, 0x5a6a7a, 0x8a9aa8],
-  windows: 0x2a3a4a,
-  palms: 0x2e8b57,
-  trunk: 0x6b4a2a,
-  pedShirts: [0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0xecf0f1, 0xe67e22],
-  pedSkin: [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac],
+// Mission definitions: id, title, briefing, objective text, reward.
+export const MISSIONS = [
+  {
+    id: 1,
+    title: 'First Wheels',
+    briefing: 'Ada needs wheels. Steal any car and bring it to her garage.',
+    objective: 'Steal a car, then drive it to Ada\u2019s garage',
+    reward: 400,
+    kind: 'steal-to-garage',
+  },
+  {
+    id: 2,
+    title: 'Package Run',
+    briefing: 'A package is waiting at the marina. Get it to Hotel Solmar before the clock runs out.',
+    objective: 'Pick up the package at the marina, deliver to Hotel Solmar',
+    reward: 600,
+    kind: 'timed-delivery',
+    timeLimit: 75,
+  },
+  {
+    id: 3,
+    title: 'Lose the Heat',
+    briefing: 'Rocco\u2019s boys tipped off the cops. You are at 2 stars — shake them and reach the pier.',
+    objective: 'Lose the 2-star wanted level, then reach the pier',
+    reward: 800,
+    kind: 'lose-heat',
+  },
+  {
+    id: 4,
+    title: 'Night Shift',
+    briefing: 'Ada\u2019s taxi needs a driver. Run 3 fares around Solmar Bay.',
+    objective: 'Complete 3 taxi fares',
+    reward: 900,
+    kind: 'taxi',
+    fares: 3,
+  },
+  {
+    id: 5,
+    title: 'The Big Score',
+    briefing: 'A courier van full of Rocco\u2019s cash is parked by the docks. Take it to the hideout.',
+    objective: 'Steal the courier van, bring it to the hideout',
+    reward: 2000,
+    kind: 'van-heist',
+  },
+];
+
+// Fixed landmarks, in world units (x, z). All sit on roads or plazas, never inside buildings.
+export const LANDMARKS = {
+  garage: { x: -100, z: -50, name: 'Ada\u2019s Garage' },
+  hotel: { x: 50, z: -100, name: 'Hotel Solmar' },
+  marina: { x: 108, z: 50, name: 'Marina' },
+  pier: { x: -108, z: 75, name: 'The Pier' },
+  hideout: { x: -75, z: 100, name: 'Hideout' },
+  docks: { x: 100, z: -75, name: 'Docks' },
+  plaza: { x: 0, z: 0, name: 'Solmar Plaza' },
+  beach: { x: 0, z: 118, name: 'Solmar Beach' },
 };
+
+export const SAVE_KEY = 'solmar-heat-save-v1';
