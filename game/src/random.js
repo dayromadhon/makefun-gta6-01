@@ -1,5 +1,5 @@
-// Seeded random numbers (mulberry32) so a fixed seed always builds the same city
-// and the same ?shot= frame. Every random choice in the game goes through here.
+// SOLMAR HEAT — seeded random (mulberry32). One seed drives the whole world
+// so a fixed seed replays the same city, traffic and pedestrians.
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -12,53 +12,28 @@ export function mulberry32(seed) {
   };
 }
 
-export class Rng {
-  constructor(seed = 1) {
+export class RNG {
+  constructor(seed = 1337) {
     this.next = mulberry32(seed);
   }
-  /** Float in [0, 1). */
+  // Float in [0, 1).
   f() {
     return this.next();
   }
-  /** Float in [min, max). */
+  // Float in [min, max).
   range(min, max) {
-    return min + (max - min) * this.next();
+    return min + this.next() * (max - min);
   }
-  /** Integer in [min, max] inclusive. */
+  // Integer in [min, max] inclusive.
   int(min, max) {
-    return min + Math.floor(this.next() * (max - min + 1));
+    return Math.floor(this.range(min, max + 1));
   }
-  /** Pick one element of an array. */
+  // Pick one item from an array.
   pick(arr) {
     return arr[Math.floor(this.next() * arr.length)];
   }
-  /** True with probability p. */
+  // True with probability p.
   chance(p) {
     return this.next() < p;
   }
-}
-
-/** Clamp a value into [min, max]. */
-export function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
-}
-
-/** Linear interpolation. */
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-/** Shortest signed angle difference from a to b, in (-PI, PI]. */
-export function angleDiff(a, b) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d <= -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
-/** Euclidean distance on the ground plane. */
-export function dist2d(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
-  return Math.sqrt(dx * dx + dz * dz);
 }

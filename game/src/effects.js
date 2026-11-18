@@ -1,95 +1,86 @@
-// Particles and impact feedback: dust puffs when drifting, sparks on a hard
-// hit, a muzzle flash, and the objective beacon — a tall golden pillar of
-// light over the current mission marker so the player can always find it.
+// SOLMAR HEAT — particles and screen feedback. A single Points pool is
+// reused for dust, sparks, smoke and muzzle flashes so nothing allocates
+// per frame.
 
 import * as THREE from 'three';
-
-const MAX_PARTICLES = 400;
 
 export class Effects {
   constructor(scene) {
     this.scene = scene;
-    this.particles = [];
-    this.beacon = null;
-    this._geo = new THREE.BoxGeometry(0.22, 0.22, 0.22);
-    this._mats = {
-      dust: new THREE.MeshBasicMaterial({ color: 0xd8c8a8 }),
-      spark: new THREE.MeshBasicMaterial({ color: 0xffd24a }),
-      smoke: new THREE.MeshBasicMaterial({ color: 0x666666, transparent: true, opacity: 0.5 }),
-      flash: new THREE.MeshBasicMaterial({ color: 0xfff2a0 }),
-    };
+    this.max = 400;
+    this.positions = new Float32Array(this.max * 3);
+    this.colors = new Float32Array(this.max * 3);
+    this.vel = new Float32Array(this.max * 3);
+    this.life = new Float32Array(this.max);
+    this.maxLife = new Float32Array(this.max);
+    this.geo = new THREE.BufferGeometry();
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    this.mat = new THREE.PointsMaterial({
+      size: 0.55,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+    this.points = new THREE.Points(this.geo, this.mat);
+    this.points.frustumCulled = false;
+    this.scene.add(this.points);
+    this.cursor = 0;
+    this._color = new THREE.Color();
   }
-
-  spawn(x, y, z, kind, count, spread = 1, up = 1) {
+  burst(x, y, z, count, colorHex, speed = 6, up = 3, life = 0.7) {
+    this._color.setHex(colorHex);
     for (let i = 0; i < count; i++) {
-      if (this.particles.length >= MAX_PARTICLES) return;
-      const mesh = new THREE.Mesh(this._geo, this._mats[kind] || this._mats.dust);
-      mesh.position.set(x, y, z);
-      this.scene.add(mesh);
-      this.particles.push({
-        mesh,
-        vx: (Math.random() * 2 - 1) * spread,
-        vy: Math.random() * up,
-        vz: (Math.random() * 2 - 1) * spread,
-        life: 0.5 + Math.random() * 0.5,
-        maxLife: 1,
-      });
+      const idx = this.cursor;
+      this.cursor = (this.cursor + 1) % this.max;
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.6);
+      this.positions[idx * 3] = x;
+      this.positions[idx * 3 + 1] = y;
+      this.positions[idx * 3 + 2] = z;
+      this.vel[idx * 3] = Math.cos(a) * s;
+      this.vel[idx * 3 + 1] = up * (0.5 + Math.random());
+      this.vel[idx * 3 + 2] = Math.sin(a) * s;
+      this.colors[idx * 3] = this._color.r;
+      this.colors[idx * 3 + 1] = this._color.g;
+      this.colors[idx * 3 + 2] = this._color.b;
+      this.life[idx] = life * (0.6 + Math.random() * 0.4);
+      this.maxLife[idx] = this.life[idx];
     }
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.color.needsUpdate = true;
   }
-
   dust(x, z) {
-    this.spawn(x, 0.3, z, 'dust', 3, 1.5, 0.8);
+    this.burst(x, 0.4, z, 3, 0xb09a7a, 2, 1.2, 0.5);
   }
-
   sparks(x, z) {
-    this.spawn(x, 0.8, z, 'spark', 10, 3, 2.5);
+    this.burst(x, 1, z, 14, 0xffd21f, 9, 4, 0.5);
   }
-
-  muzzle(x, y, z) {
-    this.spawn(x, y, z, 'flash', 4, 0.8, 0.8);
-  }
-
   smoke(x, z) {
-    this.spawn(x, 1.2, z, 'smoke', 2, 0.8, 1.2);
+    this.burst(x, 1.2, z, 8, 0x555a60, 2, 3, 1.1);
   }
-
+  muzzle(x, y, z, heading) {
+    this.burst(x + Math.cos(heading) * 1.2, y, z + Math.sin(heading) * 1.2, 6, 0xffe9a8, 7, 1, 0.25);
+  }
   update(dt) {
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      p.life -= dt;
-      if (p.life <= 0) {
-        this.scene.remove(p.mesh);
-        this.particles.splice(i, 1);
-        continue;
+    let any = false;
+    for (let i = 0; i < this.max; i++) {
+      if (this.life[i] <= 0) continue;
+      any = true;
+      this.life[i] -= dt;
+      this.positions[i * 3] += this.vel[i * 3] * dt;
+      this.positions[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
+      this.positions[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
+      this.vel[i * 3 + 1] -= 6 * dt;
+      if (this.positions[i * 3 + 1] < 0.1) {
+        this.positions[i * 3 + 1] = 0.1;
+        this.vel[i * 3 + 1] = 0;
       }
-      p.mesh.position.x += p.vx * dt;
-      p.mesh.position.y += p.vy * dt;
-      p.mesh.position.z += p.vz * dt;
-      p.vy -= 1.5 * dt;
-      const s = p.life / p.maxLife;
-      p.mesh.scale.setScalar(Math.max(0.1, s));
+      if (this.life[i] <= 0) {
+        this.positions[i * 3 + 1] = -100; // hide
+      }
     }
-    if (this.beacon) {
-      this.beacon.rotation.y += dt * 1.5;
-      this.beacon.material.opacity = 0.35 + Math.sin(Date.now() * 0.004) * 0.12;
-    }
-  }
-
-  /** Move the golden beacon over (x, z), or hide it when null. */
-  setBeacon(x, z) {
-    if (x == null) {
-      if (this.beacon) this.beacon.visible = false;
-      return;
-    }
-    if (!this.beacon) {
-      const geo = new THREE.CylinderGeometry(1.4, 1.4, 60, 12, 1, true);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xffc837, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false,
-      });
-      this.beacon = new THREE.Mesh(geo, mat);
-      this.scene.add(this.beacon);
-    }
-    this.beacon.position.set(x, 30, z);
-    this.beacon.visible = true;
+    if (any) this.geo.attributes.position.needsUpdate = true;
   }
 }

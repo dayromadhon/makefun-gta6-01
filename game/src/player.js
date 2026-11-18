@@ -1,247 +1,229 @@
-// Leo Marin, on foot and behind the wheel. On foot: WASD to walk (Shift to
-// run), E to steal/exit a car, F to punch, click to shoot, R to reload.
-// Driving hands the car the same WASD + Space handbrake. Health, cash and
-// ammo live here; the wanted system and missions read them.
+// SOLMAR HEAT — the player, Leo Marin. On foot he walks, runs, punches and
+// shoots; near a parked car he can steal it with E and drive. Getting out
+// (E again) leaves the car where it is.
 
 import * as THREE from 'three';
-import { PLAYER, CAR } from './config.js';
-import { clamp, dist2d } from './random.js';
-
-function makePlayerMesh() {
-  const group = new THREE.Group();
-  const jacket = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.4, 1.0, 4, 8),
-    new THREE.MeshLambertMaterial({ color: 0x2e5fa3 }),
-  );
-  jacket.position.y = 1.05;
-  group.add(jacket);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 10, 8),
-    new THREE.MeshLambertMaterial({ color: 0xe8b88a }),
-  );
-  head.position.y = 1.95;
-  group.add(head);
-  const hair = new THREE.Mesh(
-    new THREE.SphereGeometry(0.31, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
-  );
-  hair.position.y = 2.0;
-  group.add(hair);
-  const legs = new THREE.Mesh(
-    new THREE.BoxGeometry(0.55, 0.55, 0.35),
-    new THREE.MeshLambertMaterial({ color: 0x2c3e50 }),
-  );
-  legs.position.y = 0.28;
-  group.add(legs);
-  // A simple pistol in the right hand when armed.
-  const gun = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.12, 0.5),
-    new THREE.MeshLambertMaterial({ color: 0x111111 }),
-  );
-  gun.position.set(0.5, 1.1, 0.3);
-  group.add(gun);
-  group.userData.gun = gun;
-  return group;
-}
+import { CFG } from './config.js';
+import { makePedMesh } from './pedestrians.js';
 
 export class Player {
-  constructor(scene, city, x = 0, z = 0) {
+  constructor(scene, city, rng) {
     this.scene = scene;
     this.city = city;
-    this.mesh = makePlayerMesh();
+    this.rng = rng;
+    this.mesh = makePedMesh(rng);
+    // Leo stands out: a red shirt.
+    this.mesh.children[0].material = new THREE.MeshLambertMaterial({ color: 0xc23b2e });
     this.scene.add(this.mesh);
-    this.x = x;
-    this.z = z;
+    this.x = city.places.playerStart.x;
+    this.z = city.places.playerStart.z;
     this.heading = 0;
-    this.health = PLAYER.health;
-    this.cash = 0;
-    this.ammo = PLAYER.pistolAmmo;
-    this.ammoReserve = 48;
-    this.inCar = null; // the Car being driven, or null
-    this.speed = 0; // current speed (on foot or in car)
+    this.health = CFG.PLAYER_HEALTH;
+    this.ammo = CFG.PISTOL_AMMO;
+    this.reserve = CFG.PISTOL_RESERVE;
+    this.car = null; // the Car the player is driving (null = on foot)
+    this.walkPhase = 0;
     this.punchCooldown = 0;
     this.shootCooldown = 0;
     this.reloadTimer = 0;
-    this.invulnerable = 0;
-    this.mesh.position.set(x, 0, z);
+    this.fistTarget = null;
   }
-
   get pos() {
-    return { x: this.x, z: this.z };
+    return this.car ? { x: this.car.x, z: this.car.z } : { x: this.x, z: this.z };
   }
-
-  /** Move on foot. moveX/moveZ are -1..1 in world space; returns distance moved. */
-  walk(moveX, moveZ, run, dt) {
-    const speed = run ? PLAYER.runSpeed : PLAYER.walkSpeed;
-    const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-    if (len > 0.01) {
-      const nx = moveX / len;
-      const nz = moveZ / len;
-      this.x += nx * speed * dt;
-      this.z += nz * speed * dt;
-      this.heading = Math.atan2(nx, nz);
-      this.speed = speed;
-    } else {
-      this.speed = 0;
+  get speed() {
+    return this.car ? Math.abs(this.car.speed) : 0;
+  }
+  get inCar() {
+    return this.car !== null;
+  }
+  reset(start) {
+    this.x = start.x;
+    this.z = start.z;
+    this.heading = 0;
+    this.health = CFG.PLAYER_HEALTH;
+    this.ammo = CFG.PISTOL_AMMO;
+    this.reserve = CFG.PISTOL_RESERVE;
+    if (this.car) {
+      this.car.isPlayer = false;
+      this.car = null;
     }
-    if (this.city) {
-      this.city.resolveCircle(this, PLAYER.radius);
-      this.city.clampToWorld(this);
-    }
-    this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.rotation.y = this.heading;
-    // Walk bob.
-    this.mesh.position.y = this.speed > 0 ? Math.abs(Math.sin(Date.now() * 0.01)) * 0.06 : 0;
-    return this.speed;
-  }
-
-  /** Step into a car: hide the on-foot mesh and drive it. */
-  enterCar(car) {
-    this.inCar = car;
-    car.parked = false;
-    car.stolen = true;
-    car.driven = true; // traffic AI must leave a driven car alone
-    this.mesh.visible = false;
-    this.x = car.x;
-    this.z = car.z;
-    this.heading = car.heading;
-  }
-
-  /** Step out next to the car. */
-  exitCar() {
-    const car = this.inCar;
-    if (!car) return;
-    this.inCar = null;
-    car.speed = 0;
-    car.driven = false;
-    this.x = car.x + Math.cos(car.heading) * 3;
-    this.z = car.z - Math.sin(car.heading) * 3;
-    this.heading = car.heading;
     this.mesh.visible = true;
     this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.rotation.y = this.heading;
   }
-
-  /** Drive the current car with the given inputs; returns speed. */
-  driveCar(throttle, steer, handbrake, dt) {
-    if (!this.inCar) return 0;
-    this.inCar.drive(throttle, steer, handbrake, dt, this.city);
-    this.x = this.inCar.x;
-    this.z = this.inCar.z;
-    this.heading = this.inCar.heading;
-    this.speed = this.inCar.speed;
-    return this.speed;
+  enterCar(car) {
+    this.car = car;
+    car.isPlayer = true;
+    car.parked = false;
+    this.mesh.visible = false;
   }
-
-  /** Punch: damages the nearest ped/cop in front within range. */
-  punch(targets) {
-    if (this.punchCooldown > 0 || this.inCar) return null;
-    this.punchCooldown = PLAYER.punchCooldown;
-    const fx = Math.sin(this.heading);
-    const fz = Math.cos(this.heading);
+  exitCar() {
+    if (!this.car) return;
+    const car = this.car;
+    car.isPlayer = false;
+    car.speed = 0;
+    car.parked = true; // left parked where it stands; stealable again
+    // Step out to the car's left side.
+    const sx = car.x + Math.cos(car.heading + Math.PI / 2) * 2.2;
+    const sz = car.z + Math.sin(car.heading + Math.PI / 2) * 2.2;
+    const res = this.city.resolveCollisions(sx, sz, 0.6);
+    this.x = res.x;
+    this.z = res.z;
+    this.heading = car.heading;
+    this.car = null;
+    this.mesh.visible = true;
+    this.mesh.position.set(this.x, 0, this.z);
+  }
+  // Nearest stealable car within reach (parked, not the player's).
+  nearestCar(cars, maxDist = 4.5) {
     let best = null;
-    let bestD = PLAYER.punchRange;
-    for (const t of targets) {
-      const d = dist2d(this.x, this.z, t.x, t.z);
+    let bestD = maxDist;
+    for (const c of cars) {
+      if (c.isPlayer || c.parked === false && c.speed > 0.5) continue;
+      // Only parked cars (or slow traffic) can be stolen.
+      if (!c.parked && Math.abs(c.speed) > 1) continue;
+      const dx = c.x - this.x;
+      const dz = c.z - this.z;
+      const d = Math.sqrt(dx * dx + dz * dz);
       if (d < bestD) {
-        const dx = (t.x - this.x) / (d || 1);
-        const dz = (t.z - this.z) / (d || 1);
-        if (dx * fx + dz * fz > 0.3) {
-          bestD = d;
-          best = t;
-        }
+        bestD = d;
+        best = c;
       }
     }
     return best;
   }
-
-  /** Shoot the pistol: hitscan in the facing direction. Returns the hit target or null. */
-  shoot(targets) {
-    if (this.shootCooldown > 0 || this.reloadTimer > 0 || this.inCar) return { fired: false };
-    if (this.ammo <= 0) {
-      this.reloadTimer = PLAYER.reloadTime;
-      return { fired: false, dry: true };
-    }
-    this.shootCooldown = PLAYER.shootCooldown;
-    this.ammo -= 1;
-    const fx = Math.sin(this.heading);
-    const fz = Math.cos(this.heading);
-    let best = null;
-    let bestD = PLAYER.pistolRange;
-    for (const t of targets) {
-      const dx = t.x - this.x;
-      const dz = t.z - this.z;
-      const along = dx * fx + dz * fz;
-      if (along < 0 || along > PLAYER.pistolRange) continue;
-      const perp = Math.abs(dx * fz - dz * fx);
-      if (perp < 1.2 && along < bestD) {
-        bestD = along;
-        best = t;
-      }
-    }
-    return { fired: true, hit: best, range: bestD };
-  }
-
-  startReload() {
-    if (this.reloadTimer > 0 || this.ammo >= PLAYER.pistolAmmo || this.ammoReserve <= 0) return false;
-    this.reloadTimer = PLAYER.reloadTime;
-    return true;
-  }
-
-  takeDamage(amount) {
-    if (this.invulnerable > 0) return false;
-    this.health -= amount;
-    this.invulnerable = 0.6;
-    return true;
-  }
-
-  heal(amount) {
-    this.health = clamp(this.health + amount, 0, PLAYER.health);
-  }
-
-  addCash(amount) {
-    this.cash += amount;
-  }
-
-  update(dt) {
+  update(dt, input, cars, pedestrians, onEvent) {
     this.punchCooldown = Math.max(0, this.punchCooldown - dt);
     this.shootCooldown = Math.max(0, this.shootCooldown - dt);
-    this.invulnerable = Math.max(0, this.invulnerable - dt);
     if (this.reloadTimer > 0) {
       this.reloadTimer -= dt;
       if (this.reloadTimer <= 0) {
-        const need = PLAYER.pistolAmmo - this.ammo;
-        const take = Math.min(need, this.ammoReserve);
+        const need = CFG.PISTOL_AMMO - this.ammo;
+        const take = Math.min(need, this.reserve);
         this.ammo += take;
-        this.ammoReserve -= take;
+        this.reserve -= take;
+        onEvent && onEvent('reloaded');
       }
     }
-  }
-
-  /** Save the state the Continue button needs. */
-  toSave() {
-    return {
-      x: this.x,
-      z: this.z,
-      heading: this.heading,
-      health: this.health,
-      cash: this.cash,
-      ammo: this.ammo,
-      ammoReserve: this.ammoReserve,
-    };
-  }
-
-  fromSave(s) {
-    this.x = s.x;
-    this.z = s.z;
-    this.heading = s.heading;
-    this.health = s.health;
-    this.cash = s.cash;
-    this.ammo = s.ammo;
-    this.ammoReserve = s.ammoReserve;
-    if (this.inCar) this.exitCar();
-    this.mesh.visible = true;
+    if (this.car) {
+      this.car.update(dt, input, this.city);
+      // Knock down peds the car runs over.
+      const hit = pedestrians.knockDown(this.car.x, this.car.z, 2.4);
+      if (hit) onEvent && onEvent('ped-down', hit);
+      if (input.hit('KeyE')) {
+        this.exitCar();
+        onEvent && onEvent('exit-car');
+      }
+      return;
+    }
+    // On foot: move with WASD (camera-relative is handled by the camera
+    // facing -Z; movement is world-aligned for simplicity and reliability).
+    const speed = input.run ? CFG.PLAYER_RUN_SPEED : CFG.PLAYER_WALK_SPEED;
+    let mx = 0;
+    let mz = 0;
+    if (input.down('KeyW') || input.down('ArrowUp')) mz -= 1;
+    if (input.down('KeyS') || input.down('ArrowDown')) mz += 1;
+    if (input.down('KeyA') || input.down('ArrowLeft')) mx -= 1;
+    if (input.down('KeyD') || input.down('ArrowRight')) mx += 1;
+    if (mx !== 0 || mz !== 0) {
+      const len = Math.hypot(mx, mz);
+      mx /= len;
+      mz /= len;
+      const nx = this.x + mx * speed * dt;
+      const nz = this.z + mz * speed * dt;
+      const cl = this.city.clampToPlayable(nx, nz);
+      const res = this.city.resolveCollisions(cl.x, cl.z, 0.6);
+      this.x = res.x;
+      this.z = res.z;
+      this.heading = Math.atan2(mz, mx);
+      this.walkPhase += dt * speed * 1.6;
+      const swing = Math.sin(this.walkPhase) * 0.5;
+      this.mesh.userData.legL.rotation.x = swing;
+      this.mesh.userData.legR.rotation.x = -swing;
+    } else {
+      this.mesh.userData.legL.rotation.x = 0;
+      this.mesh.userData.legR.rotation.x = 0;
+    }
     this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.rotation.y = this.heading;
+    this.mesh.rotation.y = -this.heading + Math.PI / 2;
+    // Steal a car with E.
+    if (input.hit('KeyE')) {
+      const car = this.nearestCar(cars);
+      if (car) {
+        this.enterCar(car);
+        onEvent && onEvent('steal-car', car);
+      }
+    }
+    // Punch with F (nearest ped in front).
+    if (input.hit('KeyF') && this.punchCooldown <= 0) {
+      this.punchCooldown = 0.45;
+      let best = null;
+      let bestD = CFG.FIST_RANGE;
+      for (const p of pedestrians.peds) {
+        if (p.state === 'down') continue;
+        const dx = p.x - this.x;
+        const dz = p.z - this.z;
+        const d = Math.hypot(dx, dz);
+        if (d < bestD) {
+          bestD = d;
+          best = p;
+        }
+      }
+      if (best) {
+        best.state = 'down';
+        best.downTimer = 5;
+        best.mesh.rotation.x = Math.PI / 2;
+        best.mesh.position.y = 0.3;
+        onEvent && onEvent('punch', best);
+      } else {
+        onEvent && onEvent('punch-miss');
+      }
+    }
+    // Shoot with mouse click (or J). Hits the nearest ped in the facing cone.
+    const wantShoot = input.mouseClicked || input.hit('KeyJ');
+    if (wantShoot && this.shootCooldown <= 0 && this.reloadTimer <= 0) {
+      this.shootCooldown = 0.35;
+      if (this.ammo > 0) {
+        this.ammo -= 1;
+        let best = null;
+        let bestD = CFG.PISTOL_RANGE;
+        const fx = Math.cos(this.heading);
+        const fz = Math.sin(this.heading);
+        for (const p of pedestrians.peds) {
+          if (p.state === 'down') continue;
+          const dx = p.x - this.x;
+          const dz = p.z - this.z;
+          const d = Math.hypot(dx, dz);
+          if (d > bestD) continue;
+          const dot = (dx * fx + dz * fz) / (d || 1);
+          if (dot < 0.7) continue; // must be roughly in front
+          bestD = d;
+          best = p;
+        }
+        if (best) {
+          best.state = 'down';
+          best.downTimer = 6;
+          best.mesh.rotation.x = Math.PI / 2;
+          best.mesh.position.y = 0.3;
+          onEvent && onEvent('shot-hit', best);
+        } else {
+          onEvent && onEvent('shot-miss');
+        }
+      } else {
+        onEvent && onEvent('shot-empty');
+      }
+    }
+    // Reload with R.
+    if (input.hit('KeyR') && this.reloadTimer <= 0 && this.ammo < CFG.PISTOL_AMMO && this.reserve > 0) {
+      this.reloadTimer = 1.1;
+      onEvent && onEvent('reload-start');
+    }
+  }
+  damage(amount) {
+    this.health = Math.max(0, this.health - amount);
+    return this.health <= 0;
+  }
+  heal(amount) {
+    this.health = Math.min(CFG.PLAYER_HEALTH, this.health + amount);
   }
 }

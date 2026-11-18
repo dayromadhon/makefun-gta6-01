@@ -1,123 +1,99 @@
-// SOLMAR HEAT — configuration: one place for every number the game tunes.
-// Sun-soaked coastal city of Solmar Bay. All units are metres, all times seconds.
+// SOLMAR HEAT — config: every constant the game shares.
+// Original open-world crime game. No Rockstar/GTA names, art or assets.
 
-export const WORLD = {
-  // 5x5 street grid: streets at these x/z coordinates, blocks between them.
-  streets: [-104, -52, 0, 52, 104],
-  block: 40, // block size (edge to edge)
-  roadWidth: 12,
-  half: 130, // city spans -130..130 on x and z
-  // Beach on the east edge, marina on the south edge.
-  beachX: 130, // sand starts here
-  waterX: 158, // sea starts here
-  marinaZ: 130, // docks start here
-  waterZ: 158, // harbour water starts here
+export const CFG = {
+  // City: a 5x5 street grid. Blocks are square, roads run between them.
+  GRID: 5, // blocks per side
+  BLOCK: 46, // block size (world units)
+  ROAD: 14, // road width
+  // Derived: half the city span (roads + blocks).
+  get SPAN() {
+    return (this.GRID * this.BLOCK + (this.GRID + 1) * this.ROAD) / 2;
+  },
+  // Debt the story is about: Leo owes loan shark Rocco Vane $4,500.
+  DEBT_START: 4500,
+  // Mission payouts, in order.
+  MISSION_PAY: [400, 600, 800, 900, 2000],
+  // Taxi side-job fare range.
+  TAXI_FARE_MIN: 120,
+  TAXI_FARE_MAX: 300,
+  // Player.
+  PLAYER_HEALTH: 100,
+  PLAYER_WALK_SPEED: 9,
+  PLAYER_RUN_SPEED: 14,
+  PISTOL_AMMO: 12,
+  PISTOL_RESERVE: 48,
+  PISTOL_DAMAGE: 34,
+  PISTOL_RANGE: 60,
+  FIST_DAMAGE: 12,
+  FIST_RANGE: 2.6,
+  // Cars.
+  CAR_ACCEL: 26,
+  CAR_BRAKE: 42,
+  CAR_MAX_SPEED: 38,
+  CAR_REVERSE_SPEED: 12,
+  CAR_TURN: 1.9,
+  CAR_DRIFT: 0.55,
+  // Wanted.
+  WANTED_MAX: 5,
+  WANTED_DECAY_SECONDS: 25,
+  // Police.
+  POLICE_TOP_SPEED: 40,
+  BUST_RANGE: 3.2,
+  BUST_SECONDS: 2.5,
+  // Traffic / pedestrians.
+  TRAFFIC_COUNT: 14,
+  PED_COUNT: 26,
+  // Save key.
+  SAVE_KEY: 'solmar-heat-save-v1',
 };
 
-export const COLORS = {
-  sky: 0x87b5d6,
-  fog: 0x9fc3dd,
-  sun: 0xfff2d0,
-  asphalt: 0x2e3238,
-  asphaltLine: 0xd8d8c8,
-  sidewalk: 0x9a938a,
-  grass: 0x4d8a4a,
-  sand: 0xe0c98f,
-  water: 0x2f7fb8,
-  building: [0xb8a88f, 0x8f9bb0, 0xc0b0a0, 0x7f8a9a, 0xa89a80, 0x9a8a70],
-  glass: 0x6fa8c8,
-  palm: 0x2f7a3a,
-  trunk: 0x7a5a38,
-};
-
-export const PLAYER = {
-  walkSpeed: 6,
-  runSpeed: 10,
-  radius: 0.6,
-  health: 100,
-  pistolAmmo: 12,
-  pistolRange: 40,
-  pistolDamage: 34,
-  punchRange: 2.2,
-  punchDamage: 20,
-  punchCooldown: 0.45,
-  shootCooldown: 0.28,
-  reloadTime: 1.4,
-};
-
-export const CAR = {
-  accel: 22, // m/s^2
-  brake: 34,
-  reverseAccel: 12,
-  maxSpeed: 38, // ~137 km/h
-  maxReverse: 10,
-  steer: 0.55, // rad/s at full lock, scaled by speed
-  grip: 6.5, // lateral damping
-  handbrakeGrip: 1.6,
-  radius: 2.1,
-  // Traffic cars drive slower and never drift.
-  trafficSpeed: 9,
-  policeSpeed: 42,
-};
-
-export const WANTED = {
-  maxStars: 5,
-  decayPerSec: 0.05, // heat lost while laying low
-  stealHeat: 1.0,
-  hitPedHeat: 0.6,
-  shootHeat: 0.4,
-  killHeat: 1.2,
-  bustDistance: 3.2, // police within this and slow = busted
-  bustTime: 3.0,
-  // How many police cars per star level.
-  policePerStar: [0, 1, 2, 2, 3, 4],
-};
-
-export const DEBT = 4500;
-
+// Mission script: title, briefing, objective text.
 export const MISSIONS = [
   {
-    id: 'wheels',
+    id: 1,
     name: 'First Wheels',
-    brief: 'Steal a car and bring it to Ada\u2019s garage.',
-    reward: 400,
-    target: { x: -52, z: -104, label: 'Ada\u2019s Garage' },
-    needsCar: true,
+    brief: "Ada Kwan: Leo, you need wheels. Steal a parked car and bring it to my garage.",
+    objective: 'Steal a car and drive it to Ada\u2019s garage',
+    pay: 400,
   },
   {
-    id: 'package',
+    id: 2,
     name: 'Package Run',
-    brief: 'Pick up the package at the marina, then reach Hotel Solmar before the clock runs out.',
-    reward: 600,
-    pickup: { x: 52, z: 130, label: 'Marina Pickup' },
-    target: { x: 104, z: -52, label: 'Hotel Solmar' },
-    timeLimit: 100,
+    brief: 'Ada Kwan: Pick up the package at the marina and run it to Hotel Solmar. Fast. The clock is ticking.',
+    objective: 'Pick up the package at the marina, deliver to Hotel Solmar',
+    pay: 600,
+    timeLimit: 90,
   },
   {
-    id: 'heat',
+    id: 3,
     name: 'Lose the Heat',
-    brief: 'The cops are on you. Lose the 2-star wanted level and reach the pier.',
-    reward: 800,
-    target: { x: 130, z: 52, label: 'Pier' },
-    setWanted: 2,
+    brief: 'Ada Kwan: The cops are on you. Two stars. Shake them and get to the pier, then lay low.',
+    objective: 'Lose the wanted level, then reach the pier',
+    pay: 800,
   },
   {
-    id: 'taxi',
+    id: 4,
     name: 'Night Shift',
-    brief: 'Three taxi fares across the city. Drive a taxi to each pickup, then to the drop-off.',
-    reward: 900,
-    fares: 3,
+    brief: 'Ada Kwan: Drive the taxi. Three fares, three stops. Keep the meter running.',
+    objective: 'Complete 3 taxi fares',
+    pay: 900,
   },
   {
-    id: 'score',
+    id: 5,
     name: 'The Big Score',
-    brief: 'Steal the courier van and bring it to the hideout. This pays the debt.',
-    reward: 2000,
-    target: { x: -104, z: 104, label: 'Hideout' },
-    needsVan: true,
+    brief: 'Ada Kwan: The courier van. Steal it, bring it to the hideout. This pays the debt.',
+    objective: 'Steal the courier van and bring it to the hideout',
+    pay: 2000,
   },
 ];
 
-export const SAVE_KEY = 'solmar-heat-save-v1';
-
-export const SHOT_SEED = 7;
+// Named places (world coordinates are filled in by city.js at build time).
+export const PLACES = {
+  garage: { label: 'Ada\u2019s Garage' },
+  marina: { label: 'Marina Pickup' },
+  hotel: { label: 'Hotel Solmar' },
+  pier: { label: 'The Pier' },
+  hideout: { label: 'Hideout' },
+  beach: { label: 'Solmar Beach' },
+};
