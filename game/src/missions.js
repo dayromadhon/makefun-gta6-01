@@ -115,8 +115,19 @@ export class Missions {
   setupStage(ctx) {
     const places = this.city.places;
     if (this.index === 0) {
-      // Stage 0: steal any car. Objective: nearest parked car.
-      const car = this.vehicles.parked[0];
+      // Stage 0: steal any car. Objective: nearest parked car to the
+      // player (Ada's lined-up car is a short walk west of the spawn).
+      let car = null;
+      let bestD = 1e9;
+      for (const c of this.vehicles.parked) {
+        if (c.stolen) continue;
+        const d = Math.hypot(c.mesh.position.x - ctx.player.pos.x, c.mesh.position.z - ctx.player.pos.z);
+        if (d < bestD) {
+          bestD = d;
+          car = c;
+        }
+      }
+      if (!car) car = this.vehicles.parked[0];
       this.setObjective(car.mesh.position.x, car.mesh.position.z, 'Steal a car');
       ctx.hud.setObjective('Steal a car (press E near one)');
     } else if (this.index === 1) {

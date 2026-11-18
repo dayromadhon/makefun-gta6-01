@@ -251,15 +251,16 @@ export class City {
       }
     }
 
-    // Named places the missions use.
+    // Named places the missions use. Every one sits ON a road (or open
+    // ground at the pier/marina), never inside a building footprint.
     this.places = {
-      garage: { x: -120, z: -60, label: "Ada's Garage" },
-      hotel: { x: 60, z: -120, label: 'Hotel Solmar' },
+      garage: { x: -120, z: -90, label: "Ada's Garage" },
+      hotel: { x: 60, z: -90, label: 'Hotel Solmar' },
       pier: { x: 0, z: 164, label: 'Solmar Pier' },
       marina: { x: 164, z: 60, label: 'Marina Pickup' },
-      hideout: { x: -120, z: 120, label: 'Hideout' },
-      hospital: { x: -60, z: 120, label: 'Solmar General' },
-      plaza: { x: 0, z: 0, label: 'Central Plaza' },
+      hideout: { x: -120, z: 90, label: 'Hideout' },
+      hospital: { x: -60, z: 90, label: 'Solmar General' },
+      plaza: { x: 0, z: 30, label: 'Central Plaza' },
     };
   }
 

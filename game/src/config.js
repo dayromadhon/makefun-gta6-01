@@ -1,10 +1,12 @@
 // config.js — every tuning number for SOLMAR HEAT lives here, one place.
 export const CONFIG = {
   // World: a 5x5 street grid. Streets run at these centre lines on x and z.
+  // Six streets make 5x5 blocks: block centres sit at -120..120, i.e.
+  // BETWEEN streets, so no building ever stands on a road.
   blockSize: 46,
   roadWidth: 14,
   streetGap: 60,
-  streets: [-120, -60, 0, 60, 120],
+  streets: [-150, -90, -30, 30, 90, 150],
   cityHalf: 150,
   // Beach (south, +z) and marina (east, +x) sit just past the grid.
   beachZ: 156,

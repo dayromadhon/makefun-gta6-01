@@ -100,7 +100,15 @@ export class Vehicles {
 
   buildParked() {
     // Parked cars along curbs, deterministic from the seed.
-    for (let i = 0; i < 10; i++) {
+    // First car: Ada lined one up for Leo — parked on the north curb of
+    // the z=-30 road, a short walk west of the spawn (0,-30), so Mission 1
+    // starts on an open road with no building between player and car.
+    const first = makeCarMesh(this.rng.pick(PALETTE.cars), 'sedan');
+    first.position.set(-20, 0, -23.5);
+    first.rotation.y = Math.PI / 2;
+    this.scene.add(first);
+    this.parked.push({ mesh: first, kind: 'sedan', speed: 0, stolen: false, isParked: true, heading: Math.PI / 2 });
+    for (let i = 0; i < 9; i++) {
       const color = this.rng.pick(PALETTE.cars);
       const mesh = makeCarMesh(color, 'sedan');
       const street = this.rng.pick(CONFIG.streets);
