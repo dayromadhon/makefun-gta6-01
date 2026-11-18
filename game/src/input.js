@@ -1,89 +1,65 @@
-// Solmar Heat — keyboard and mouse input. One job: turn raw DOM events
-// into a clean per-frame input state the player and camera read.
+// input.js — keyboard + mouse state with edge detection (pressed this frame).
 export class Input {
-  constructor(canvas) {
+  constructor() {
     this.keys = new Set();
-    this.pressed = new Set(); // keys pressed since last frame (edge-triggered)
-    this.mouseDX = 0;
-    this.mouseDY = 0;
+    this.pressed = new Set();
+    this.mouseX = 0;
+    this.mouseY = 0;
     this.mouseDown = false;
-    this.dragging = false;
-    this.clickX = 0;
-    this.clickY = 0;
-    this.clicked = false; // left mouse button clicked since last frame
-    this.wheel = 0;
-    this.canvas = canvas;
-
+    this.mousePressed = false;
+    this.anyKey = false;
     window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      this.pressed.add(e.code);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
-        e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if (!e.repeat) {
+        this.pressed.add(e.key.toLowerCase());
+        this.anyKey = true;
       }
+      this.keys.add(e.key.toLowerCase());
     });
     window.addEventListener('keyup', (e) => {
-      this.keys.delete(e.code);
+      this.keys.delete(e.key.toLowerCase());
     });
-    window.addEventListener('blur', () => {
-      this.keys.clear();
+    window.addEventListener('mousemove', (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
     });
-    canvas.addEventListener('mousedown', (e) => {
+    window.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
         this.mouseDown = true;
-        this.clicked = true;
-        this.clickX = e.clientX;
-        this.clickY = e.clientY;
+        this.mousePressed = true;
       }
-      if (e.button === 2) this.dragging = true;
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouseDown = false;
-      if (e.button === 2) this.dragging = false;
     });
-    window.addEventListener('mousemove', (e) => {
-      if (this.dragging) {
-        this.mouseDX += e.movementX || 0;
-        this.mouseDY += e.movementY || 0;
-      }
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.mouseDown = false;
     });
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    canvas.addEventListener('wheel', (e) => {
-      this.wheel += e.deltaY;
-      e.preventDefault();
-    }, { passive: false });
   }
-
-  down(code) {
-    return this.keys.has(code);
+  down(key) {
+    return this.keys.has(key.toLowerCase());
   }
-
-  // True once, on the frame the key went down.
-  hit(code) {
-    return this.pressed.has(code);
+  wasPressed(key) {
+    return this.pressed.has(key.toLowerCase());
   }
-
-  // Steering: -1 (left) .. +1 (right), from A/D or arrow keys.
-  steer() {
-    let s = 0;
-    if (this.down('KeyA') || this.down('ArrowLeft')) s -= 1;
-    if (this.down('KeyD') || this.down('ArrowRight')) s += 1;
-    return s;
-  }
-
-  throttle() {
-    let t = 0;
-    if (this.down('KeyW') || this.down('ArrowUp')) t += 1;
-    if (this.down('KeyS') || this.down('ArrowDown')) t -= 1;
-    return t;
-  }
-
-  // Call at the end of each frame to clear edge-triggered state.
+  // Call at the end of each frame so edges last exactly one frame.
   endFrame() {
     this.pressed.clear();
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.clicked = false;
-    this.wheel = 0;
+    this.mousePressed = false;
+    this.anyKey = false;
+  }
+  // Driving / walking axes: -1..1.
+  moveX() {
+    let x = 0;
+    if (this.down('a') || this.down('arrowleft')) x -= 1;
+    if (this.down('d') || this.down('arrowright')) x += 1;
+    return x;
+  }
+  moveY() {
+    let y = 0;
+    if (this.down('w') || this.down('arrowup')) y += 1;
+    if (this.down('s') || this.down('arrowdown')) y -= 1;
+    return y;
   }
 }

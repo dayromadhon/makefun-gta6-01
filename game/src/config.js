@@ -1,110 +1,88 @@
-// Solmar Heat — world constants, story, prices and tuning.
-// One job: every number the rest of the game agrees on lives here.
-export const WORLD = {
-  grid: [-80, -40, 0, 40, 80], // street center lines (x and z)
-  half: 100, // city edge; beach starts past +100 z, marina past +100 x
-  roadWidth: 10,
-  block: 30, // block size between streets
-};
+// config.js — every tuning number for SOLMAR HEAT lives here, one place.
+export const CONFIG = {
+  // World: a 5x5 street grid. Streets run at these centre lines on x and z.
+  blockSize: 46,
+  roadWidth: 14,
+  streetGap: 60,
+  streets: [-120, -60, 0, 60, 120],
+  cityHalf: 150,
+  // Beach (south, +z) and marina (east, +x) sit just past the grid.
+  beachZ: 156,
+  waterZ: 172,
+  marinaX: 156,
+  dockX: 176,
 
-export const ECONOMY = {
-  startCash: 120,
-  debt: 4500,
-  bustFine: 150,
-  wastedFine: 100,
-  sideTaxiMin: 80,
-  sideTaxiMax: 200,
-  sideCourierMin: 120,
-  sideCourierMax: 260,
-};
-
-export const CAR = {
-  sedanAccel: 15,
-  sedanTop: 36,
-  taxiAccel: 14,
-  taxiTop: 34,
-  vanAccel: 11,
-  vanTop: 30,
-  policeAccel: 17,
-  policeTop: 40,
-  brake: 22,
-  reverseTop: 12,
-  steerBase: 1.9,
-  driftSteer: 3.1,
-  grip: 6.5,
-};
-
-export const PLAYER = {
+  // Player on foot.
   walkSpeed: 6,
-  runSpeed: 9,
-  health: 100,
-  fistDamage: 12,
+  runSpeed: 10,
+  playerRadius: 0.6,
+  playerHealth: 100,
+
+  // Cars.
+  carAccel: 14,
+  carBrake: 26,
+  carReverseMax: 8,
+  carMaxSpeed: 34,
+  carTurn: 1.9,
+  handbrakeTurn: 3.4,
+  carRadius: 1.6,
+  trafficSpeed: 9,
+  taxiSpeed: 11,
+  policeSpeed: 38,
+
+  // Wanted.
+  bustDistance: 3.0,
+  bustTime: 2.5,
+  bustFine: 100,
+  wantedDecaySeconds: 30,
+  maxStars: 5,
+
+  // Combat.
   pistolDamage: 34,
   pistolMag: 12,
-  pistolRange: 55,
+  pistolReserve: 999,
+  pistolRange: 60,
+  fistDamage: 12,
+  fistRange: 2.2,
+  fistCooldown: 0.45,
+
+  // Money.
+  debtStart: 4500,
+  missionPay: [400, 600, 800, 900, 2000],
+  taxiFare: 120,
+  packagePay: 250,
+
+  // Missions.
+  packageTimeLimit: 90,
+  taxiFaresNeeded: 3,
+  heatSurviveSeconds: 12,
+
+  // Save.
+  saveKey: 'solmar-heat-save-v1',
+
+  // Look.
+  skyColor: 0x87bfe8,
+  fogColor: 0xa8c8e0,
+  sunColor: 0xfff2d8,
+  groundColor: 0x9aa08a,
+  roadColor: 0x3a3d42,
+  sidewalkColor: 0xb8b0a0,
+  sandColor: 0xe8d29a,
+  waterColor: 0x2e7fa8,
 };
 
-// Story missions, in order. Each has an id, a title, a short brief and a
-// reward. The missions module turns these into objectives at runtime.
-export const MISSIONS = [
-  {
-    id: 'first-wheels',
-    title: 'First Wheels',
-    reward: 400,
-    brief: 'Ada needs wheels. Steal a parked sedan and bring it to her garage on the west side.',
-  },
-  {
-    id: 'package-run',
-    title: 'Package Run',
-    reward: 600,
-    brief: 'Pick up the package at the marina and deliver it to the Hotel Solmar. The clock is running.',
-  },
-  {
-    id: 'lose-heat',
-    title: 'Lose the Heat',
-    reward: 800,
-    brief: 'The cops are on you — two stars. Break away and hide out at the South Pier until they lose you.',
-  },
-  {
-    id: 'night-shift',
-    title: 'Night Shift',
-    reward: 900,
-    brief: 'Three fares, one night. Pick up passengers and drop them where they need to be.',
-  },
-  {
-    id: 'big-score',
-    title: 'The Big Score',
-    reward: 2000,
-    brief: 'Steal the courier van from the east depot and bring it to the hideout. This one clears the debt.',
-  },
-];
-
-// Named places on the map (x, z). Missions and side jobs point at these.
-export const PLACES = {
-  garage: { x: -80, z: 80, label: "Ada's Garage" },
-  marinaPickup: { x: 112, z: 40, label: 'Marina Pickup' },
-  hotel: { x: 40, z: -40, label: 'Hotel Solmar' },
-  pier: { x: 0, z: 112, label: 'South Pier' },
-  depot: { x: 80, z: -80, label: 'East Depot' },
-  hideout: { x: -80, z: -80, label: 'Hideout' },
-  hospital: { x: -40, z: -80, label: 'Clinic' },
-  start: { x: 24, z: 80, label: 'Start' },
-  sedanSpot: { x: 12, z: 80, label: 'Parked Sedan' },
-  vanSpot: { x: 84, z: -72, label: 'Courier Van' },
-};
-
-export const COLORS = {
-  sky: 0x87b5d6,
-  fog: 0x9fc3d8,
-  sun: 0xfff2d8,
-  ground: 0x8a8f7a,
-  sidewalk: 0x9a9a94,
-  road: 0x3a3d42,
-  sand: 0xdcc28e,
-  sea: 0x2e7f9e,
-  marina: 0x6b7a86,
-  leo: 0xc23b2e,
-  police: 0x1c2f4a,
-  taxi: 0xf2c200,
-  van: 0xe8e8e8,
+// Palette for cars, buildings and people — sun-soaked Solmar Bay.
+export const PALETTE = {
+  cars: [0xc0392b, 0x2980b9, 0xf39c12, 0x27ae60, 0x8e44ad, 0xececec, 0x2c3e50, 0xd35400, 0x16a085],
+  taxi: 0xf1c40f,
+  police: 0x1a1a2e,
+  policeLight: 0xff2222,
+  van: 0xd8d8d8,
+  buildings: [0xd8c8a8, 0xc8b898, 0xb8a888, 0xa8b8c8, 0xc8a8a8, 0x98a8b8],
+  towers: [0x6a7a8a, 0x7a8a9a, 0x5a6a7a, 0x8a9aa8],
+  windows: 0x2a3a4a,
+  palms: 0x2e8b57,
+  trunk: 0x6b4a2a,
+  pedShirts: [0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0xecf0f1, 0xe67e22],
+  pedSkin: [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac],
 };
