@@ -73,18 +73,20 @@ class Game {
     window.addEventListener('pointerdown', gesture, { once: true });
     window.addEventListener('keydown', gesture, { once: true });
 
-    // Test hooks (also used by the shot scenes).
+    // Test hooks (also used by the shot scenes). Live getters: newGame()
+    // replaces the missions object, so a snapshot would go stale.
+    const self = this;
     window.__game = {
       game: this,
       state: () => this.state,
       cash: () => this.cash,
-      player: this.player,
-      missions: this.missions,
-      wanted: this.wanted,
-      vehicles: this.vehicles,
-      city: this.city,
-      camera: this.camera,
-      hud: this.hud,
+      get player() { return self.player; },
+      get missions() { return self.missions; },
+      get wanted() { return self.wanted; },
+      get vehicles() { return self.vehicles; },
+      get city() { return self.city; },
+      get camera() { return self.camera; },
+      get hud() { return self.hud; },
     };
 
     if (this.shotMode) {

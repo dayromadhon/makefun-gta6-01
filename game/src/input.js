@@ -26,7 +26,9 @@ export class Input {
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
         this.mouseDown = true;
-        this.mousePressed = true;
+        // Only a click on the game canvas fires the pistol: clicks on HUD
+        // buttons (New Game, GO, Continue) must not shoot.
+        this.mousePressed = !!(e.target && e.target.id === 'game-canvas');
       }
     });
     window.addEventListener('mouseup', (e) => {
