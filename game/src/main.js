@@ -165,6 +165,7 @@ class Game {
   newGame() {
     localStorage.removeItem(CONFIG.saveKey);
     this.cash = 0;
+    if (this.missions) this.scene.remove(this.missions.beacon);
     this.missions = new Missions(this.scene, this.city, this.vehicles, this.rng);
     this.player.spawn(0, -30);
     this.wanted.clear();

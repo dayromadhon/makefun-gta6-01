@@ -82,7 +82,7 @@ export class HUD {
     this.splashBtn.addEventListener('click', () => handlers.onSplash());
     // Title screen.
     this.title = el('div', 'title-screen', this.root);
-    this.title.style.cssText = 'position:absolute;inset:0;background:linear-gradient(160deg,#0a1a2e 0%,#123a5e 45%,#c86a2a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;text-align:center';
+    this.title.style.cssText = 'position:absolute;inset:0;background:linear-gradient(160deg,rgba(10,26,46,.88) 0%,rgba(18,58,94,.82) 45%,rgba(200,106,42,.82) 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;text-align:center';
     el('h1', null, this.title, 'SOLMAR HEAT').style.cssText = 'font-size:64px;margin:0;letter-spacing:6px;color:#ffcc00;text-shadow:0 4px 0 #7a3a00';
     el('p', null, this.title, 'An open-world crime game in Solmar Bay').style.cssText = 'font-size:20px;margin:8px 0 24px;color:#fff';
     this.newBtn = el('button', null, this.title, '▶  New Game');
