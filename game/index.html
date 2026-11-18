@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOLMAR HEAT — an open-world crime game</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0a1a2e; height: 100%; }
+  #game-canvas { display: block; width: 100vw; height: 100vh; }
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; border-radius: 50%;
+    background: rgba(255,255,255,.9); box-shadow: 0 0 4px #000;
+    pointer-events: none; z-index: 5;
+  }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+<div id="crosshair"></div>
+<script src="vendor/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

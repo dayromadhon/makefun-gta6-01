@@ -340,6 +340,10 @@ export class Player {
         ctx.camera.shake(0.3);
       }
     }
+    // The player's position tracks the car while driving (wanted, missions,
+    // minimap and camera all read player.pos).
+    this.pos.set(mesh.position.x, 0, mesh.position.z);
+    this.heading = mesh.rotation.y;
     // Engine + speed lines.
     ctx.audio.engine(Math.abs(this.carSpeed) / CONFIG.carMaxSpeed, true);
     // Exit the car.
