@@ -1,11 +1,9 @@
-// SOLMAR HEAT — random.js
-// One job: a small seeded random number generator so the city, traffic and
-// screenshot scenes are reproducible from a fixed seed.
+// Seeded random numbers (mulberry32) so a fixed seed always builds the same city
+// and the same ?shot= frame. Every random choice in the game goes through here.
 
-export function createRng(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
-  if (a === 0) a = 0x9e3779b9;
-  return function next() {
+  return function () {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -14,31 +12,53 @@ export function createRng(seed) {
   };
 }
 
-export function range(rng, min, max) {
-  return min + rng() * (max - min);
+export class Rng {
+  constructor(seed = 1) {
+    this.next = mulberry32(seed);
+  }
+  /** Float in [0, 1). */
+  f() {
+    return this.next();
+  }
+  /** Float in [min, max). */
+  range(min, max) {
+    return min + (max - min) * this.next();
+  }
+  /** Integer in [min, max] inclusive. */
+  int(min, max) {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+  /** Pick one element of an array. */
+  pick(arr) {
+    return arr[Math.floor(this.next() * arr.length)];
+  }
+  /** True with probability p. */
+  chance(p) {
+    return this.next() < p;
+  }
 }
 
-export function rangeInt(rng, min, max) {
-  return Math.floor(range(rng, min, max + 1));
+/** Clamp a value into [min, max]. */
+export function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
 }
 
-export function pick(rng, list) {
-  return list[Math.floor(rng() * list.length)];
+/** Linear interpolation. */
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
-export function chance(rng, p) {
-  return rng() < p;
+/** Shortest signed angle difference from a to b, in (-PI, PI]. */
+export function angleDiff(a, b) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d <= -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
-// A street line from the grid, snapped so cars and spawns sit on roads.
-export function streetLine(rng, lines) {
-  return lines[Math.floor(rng() * lines.length)];
-}
-
-// A point on a random street (x along the street, z fixed to the line, or the reverse).
-export function streetPoint(rng, lines, half) {
-  const line = streetLine(rng, lines);
-  const along = range(rng, -half, half);
-  if (rng() < 0.5) return { x: along, z: line };
-  return { x: line, z: along };
+/** Euclidean distance on the ground plane. */
+export function dist2d(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return Math.sqrt(dx * dx + dz * dz);
 }

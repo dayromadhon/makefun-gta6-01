@@ -1,118 +1,69 @@
-// SOLMAR HEAT — wanted.js
-// One job: the wanted level. Heat rises with crimes, falls when the player
-// stays out of sight, and police cars spawn and chase while stars are up.
-// A bust happens when a cop stays close for long enough.
+// The wanted system: heat 0..5, stars shown as a whole number. Crimes add heat;
+// laying low lets it decay. Police cars spawn per star level, chase and ram,
+// and a slow player caught close to a police car gets busted.
 
-import { CONFIG } from './config.js';
-import { range } from './random.js';
+import { WANTED } from './config.js';
+import { clamp, dist2d } from './random.js';
 
-export class Wanted {
-  constructor(vehicles, rng, audio) {
-    this.vehicles = vehicles;
-    this.rng = rng;
-    this.audio = audio;
-    this.heat = 0; // 0..5, fractional; stars = floor
-    this.stars = 0;
+export class WantedSystem {
+  constructor() {
+    this.heat = 0;
     this.bustTimer = 0;
     this.busted = false;
-    this._spawnT = 0;
-    this._sirenOn = false;
+    this.heatFlash = 0; // brief timer after a crime, for the HUD flash
   }
 
-  get level() {
+  get stars() {
+    // Round, never floor: 1.0 heat is one star, not zero.
+    return clamp(Math.round(this.heat), 0, WANTED.maxStars);
+  }
+
+  addHeat(amount, reason) {
+    this.heat = clamp(this.heat + amount, 0, WANTED.maxStars);
+    this.heatFlash = 1.2;
     return this.stars;
   }
 
-  addHeat(amount) {
-    this.heat = Math.min(CONFIG.maxStars, this.heat + amount);
-    this._syncStars();
-  }
-
-  setHeat(value) {
-    this.heat = Math.max(0, Math.min(CONFIG.maxStars, value));
-    this._syncStars();
+  setHeat(amount) {
+    this.heat = clamp(amount, 0, WANTED.maxStars);
+    this.heatFlash = 1.2;
   }
 
   clear() {
     this.heat = 0;
-    this._syncStars();
     this.bustTimer = 0;
     this.busted = false;
-    for (const cop of [...this.vehicles.police]) this.vehicles.removePolice(cop);
-    this._setSiren(false);
   }
 
-  _syncStars() {
-    // Round to the nearest whole star: heat decays continuously, so a plain
-    // floor drops a fresh 1.0 heat to 0 stars after a single decay tick.
-    const s = Math.round(this.heat);
-    if (s !== this.stars) {
-      this.stars = s;
-      this._setSiren(s > 0);
+  /** Per-frame: decay, bust check, police spawn count. */
+  update(dt, playerPos, playerSpeed, policeCars) {
+    this.heatFlash = Math.max(0, this.heatFlash - dt);
+    // Heat decays only when no police car is close.
+    const nearestPolice = policeCars.reduce((m, p) => Math.min(m, dist2d(playerPos.x, playerPos.z, p.x, p.z)), 999);
+    if (nearestPolice > 25) {
+      this.heat = Math.max(0, this.heat - WANTED.decayPerSec * dt);
     }
-  }
-
-  _setSiren(on) {
-    if (on === this._sirenOn) return;
-    this._sirenOn = on;
-    this.audio.siren(on);
-  }
-
-  // One frame. target = {x, z, inCar, speed}. visible = whether any cop can
-  // currently see the player (close enough). Returns 'busted' once when the
-  // bust completes, else null.
-  update(dt, target, visible) {
-    if (this.busted) return null;
-    // Heat decays only while no cop sees the player.
-    if (!visible && this.stars > 0) {
-      this.heat = Math.max(0, this.heat - CONFIG.heatDecayPerSec * dt);
-      this._syncStars();
-    }
-    // Spawn police while wanted, up to a cap that grows with stars.
-    const want = Math.min(CONFIG.maxCops, this.stars * 2);
-    this._spawnT -= dt;
-    if (this.vehicles.police.length < want && this._spawnT <= 0) {
-      this._spawnT = 1.2;
-      const a = this.rng() * Math.PI * 2;
-      const r = CONFIG.copSpawnRadius;
-      const x = target.x + Math.sin(a) * r;
-      const z = target.z + Math.cos(a) * r;
-      this.vehicles.spawnPolice(x, z);
-    }
-    // Remove extra cops when the level falls.
-    while (this.vehicles.police.length > want) {
-      this.vehicles.removePolice(this.vehicles.police[this.vehicles.police.length - 1]);
-    }
-    // Chase.
-    this.vehicles.updatePolice(dt, target);
-    // Bust: a cop within bust radius for bustHoldSec.
-    let near = false;
-    for (const cop of this.vehicles.police) {
-      const d = Math.hypot(cop.x - target.x, cop.z - target.z);
-      if (d < CONFIG.bustRadius) {
-        near = true;
-        break;
-      }
-    }
-    if (near && this.stars > 0) {
+    // Busted: a police car is close and the player is slow or on foot.
+    const close = nearestPolice < WANTED.bustDistance;
+    if (close && playerSpeed < 3) {
       this.bustTimer += dt;
-      if (this.bustTimer >= CONFIG.bustHoldSec) {
+      if (this.bustTimer >= WANTED.bustTime) {
         this.busted = true;
-        this.audio.siren(false);
-        this._sirenOn = false;
-        this.audio.busted();
-        return 'busted';
       }
     } else {
       this.bustTimer = Math.max(0, this.bustTimer - dt * 2);
     }
-    return null;
+    return WANTED.policePerStar[this.stars];
   }
 
-  // How visible the player is to the police right now (any cop within 40u).
-  visibleToPolice(target) {
-    for (const cop of this.vehicles.police) {
-      if (Math.hypot(cop.x - target.x, cop.z - target.z) < 40) return true;
+  /** Police ramming damage: called when a police car touches the player. */
+  policeTouchDamage(player, policeCars, dt) {
+    for (const p of policeCars) {
+      const d = dist2d(player.x, player.z, p.x, p.z);
+      if (d < 3.2) {
+        const wasHit = player.takeDamage(8 * dt);
+        if (wasHit) return true;
+      }
     }
     return false;
   }

@@ -1,122 +1,61 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMAR HEAT — an open-world crime game</title>
-<link rel="icon" href="data:,">
+<title>SOLMAR HEAT — Make GTA 6</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0c1220; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; }
-  #game { position: fixed; inset: 0; }
-  #game canvas { display: block; }
-  .hidden { display: none !important; }
-
-  /* HUD: never eats a click meant for the game — only buttons take pointers. */
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1a24; font-family: 'Segoe UI', system-ui, sans-serif; color: #fff; }
+  #app, #app canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
   #hud button { pointer-events: auto; }
-  #topbar { position: absolute; top: 14px; right: 16px; text-align: right; text-shadow: 0 2px 4px rgba(0,0,0,.7); }
-  #stars { font-size: 30px; letter-spacing: 4px; color: #ffd76e; }
-  #stars.hot { color: #ff5a4a; animation: blink 0.7s steps(2) infinite; }
-  @keyframes blink { 50% { opacity: .45; } }
-  #cash { font-size: 26px; font-weight: 700; }
-  #debt { font-size: 14px; opacity: .9; }
-  #health-bar { width: 180px; height: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.5); border-radius: 5px; margin-top: 6px; margin-left: auto; overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: #58c96b; }
-  #speed { font-size: 20px; font-weight: 700; margin-top: 4px; }
-  #ammo { font-size: 14px; opacity: .9; }
-  #timer { font-size: 30px; font-weight: 800; color: #ff5a4a; margin-top: 4px; }
 
-  #minimap { position: absolute; left: 14px; bottom: 14px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.65); border-radius: 8px; background: rgba(10,14,20,.55); }
-  #objective-arrow { position: absolute; left: 50%; top: 64px; font-size: 22px; font-weight: 800; color: #f7c948; text-shadow: 0 2px 4px rgba(0,0,0,.8); transform: translateX(-50%); }
-  #message { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); background: rgba(10,14,20,.82); border: 1px solid #f7c948; border-radius: 8px; padding: 10px 18px; font-size: 18px; font-weight: 600; max-width: 70%; text-align: center; }
-  #crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border: 2px solid rgba(255,255,255,.9); border-radius: 50%; box-shadow: 0 0 4px rgba(0,0,0,.8); }
-  #crosshair::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: #fff; border-radius: 50%; }
+  .hud-tl { position: absolute; top: 14px; left: 16px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .cash { font-size: 30px; font-weight: 800; color: #7dff9a; }
+  .debt { font-size: 14px; color: #ffb3b3; margin-top: 2px; }
+  .health-wrap { width: 180px; height: 10px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.4); border-radius: 5px; margin-top: 8px; overflow: hidden; }
+  .health-bar { height: 100%; width: 100%; background: #2ecc71; transition: width .2s; }
+  .health-text { font-size: 13px; margin-top: 3px; }
 
-  #mission-card { position: absolute; left: 14px; top: 14px; width: 320px; background: rgba(10,14,20,.85); border: 1px solid #f7c948; border-left: 6px solid #f7c948; border-radius: 8px; padding: 12px 14px; }
-  #mission-title { font-size: 19px; font-weight: 800; color: #f7c948; }
-  #mission-objective { font-size: 14px; margin: 6px 0; line-height: 1.45; }
-  #mission-reward { font-size: 14px; font-weight: 700; color: #58c96b; }
+  .hud-tr { position: absolute; top: 14px; right: 16px; text-align: right; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .stars { font-size: 26px; letter-spacing: 3px; }
+  .ammo { font-size: 14px; margin-top: 4px; color: #ffe9a8; }
 
-  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(12,18,32,.55), rgba(8,10,18,.92)); z-index: 20; }
-  .panel { text-align: center; max-width: 560px; padding: 28px 34px; background: rgba(10,14,20,.88); border: 1px solid rgba(247,201,72,.6); border-radius: 14px; }
-  .panel h1 { font-size: 52px; letter-spacing: 2px; color: #f7c948; text-shadow: 0 3px 0 #a83c2a; }
-  .panel h2 { font-size: 30px; color: #f7c948; margin-bottom: 8px; }
-  .panel p { font-size: 15px; line-height: 1.55; opacity: .92; margin: 10px 0; }
-  .panel .controls { font-size: 13px; opacity: .75; margin: 14px 0; line-height: 1.7; }
-  .panel button, #mission-card button { pointer-events: auto; display: block; width: 100%; margin: 10px 0 0; padding: 12px; font-size: 17px; font-weight: 700; color: #10131a; background: #f7c948; border: none; border-radius: 8px; cursor: pointer; }
-  .panel button:hover, #mission-card button:hover { background: #ffd76e; }
-  .panel button.secondary { background: #3a4356; color: #fff; }
-  #mission-card button { margin-top: 10px; padding: 9px; font-size: 15px; }
-  #save-info { font-size: 13px; opacity: .8; }
-  #mc-reward { font-size: 26px; font-weight: 800; color: #58c96b; }
+  .hud-tc { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: min(520px, 60vw); text-align: center; background: rgba(8, 18, 28, .62); border: 1px solid rgba(255,200,55,.5); border-radius: 10px; padding: 8px 14px; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+  .mission-title { font-size: 17px; font-weight: 700; color: #ffc837; }
+  .mission-brief { font-size: 13px; margin-top: 2px; color: #e8e8e8; }
+  .mission-target { font-size: 13px; margin-top: 2px; color: #9fd8ff; }
+  .mission-timer { font-size: 15px; font-weight: 700; color: #ff8a7a; margin-top: 2px; }
+
+  .hud-bl { position: absolute; left: 16px; bottom: 16px; }
+  .minimap { border: 2px solid rgba(255,255,255,.5); border-radius: 8px; background: rgba(10,20,30,.75); }
+
+  .hud-br { position: absolute; right: 16px; bottom: 16px; text-align: right; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  .speed { font-size: 26px; font-weight: 800; }
+  .hint { font-size: 11px; color: rgba(255,255,255,.65); margin-top: 4px; max-width: 320px; }
+
+  .toast { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); background: rgba(8,18,28,.85); border: 1px solid rgba(255,255,255,.35); border-radius: 8px; padding: 10px 18px; font-size: 15px; opacity: 0; transition: opacity .3s; max-width: 70vw; text-align: center; }
+
+  .screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: rgba(5, 12, 20, .62); z-index: 10; padding: 20px; }
+  .screen-title { font-size: 54px; font-weight: 900; letter-spacing: 4px; color: #ffc837; margin: 0 0 12px; text-shadow: 0 3px 0 #7a4a00, 0 6px 18px rgba(0,0,0,.7); }
+  .screen-body { font-size: 17px; line-height: 1.6; max-width: 620px; color: #f0f0f0; }
+  .screen-body .keys { font-size: 14px; color: #bcd8ff; }
+  .screen-btn { margin-top: 22px; font-size: 19px; font-weight: 700; padding: 13px 34px; border: none; border-radius: 10px; background: #ffc837; color: #201400; cursor: pointer; box-shadow: 0 4px 0 #a67c00; }
+  .screen-btn:hover { background: #ffd95e; }
+  .screen-btn.secondary { background: #2e6da4; color: #fff; box-shadow: 0 4px 0 #1a4066; margin-left: 10px; }
+  .screen-btn.secondary:hover { background: #3a84c4; }
 </style>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.min.js" } }
+{
+  "imports": {
+    "three": "./vendor/three.min.js"
+  }
+}
 </script>
 </head>
 <body>
-<div id="game"></div>
-
-<div id="hud">
-  <div id="topbar">
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="cash">$0</div>
-    <div id="debt">Debt: $4500</div>
-    <div id="health-bar"><div id="health-fill"></div></div>
-    <div id="speed"></div>
-    <div id="ammo"></div>
-    <div id="timer" class="hidden"></div>
-  </div>
-  <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="objective-arrow" style="display:none">▲</div>
-  <div id="message" class="hidden"></div>
-  <div id="crosshair" style="display:none"></div>
-  <div id="mission-card" class="hidden">
-    <div id="mission-title"></div>
-    <div id="mission-objective"></div>
-    <div id="mission-reward"></div>
-    <button id="btn-go">GO</button>
-  </div>
-</div>
-
-<div id="title-screen" class="screen">
-  <div class="panel">
-    <h1>SOLMAR HEAT</h1>
-    <p>Sun-soaked Solmar Bay. Leo Marin owes <b>$4,500</b> to loan shark Rocco Vane. Dispatcher Ada Kwan has the jobs to pay it off — steal cars, run packages, lose the cops, drive the taxi, and pull the big score.</p>
-    <p class="controls">WASD drive / walk &nbsp;·&nbsp; E steal or exit a car &nbsp;·&nbsp; Space handbrake &nbsp;·&nbsp; Mouse drag camera &nbsp;·&nbsp; Click shoot &nbsp;·&nbsp; F punch &nbsp;·&nbsp; R reload &nbsp;·&nbsp; Shift run &nbsp;·&nbsp; Esc pause &nbsp;·&nbsp; M mute</p>
-    <p id="save-info"></p>
-    <button id="btn-new">NEW GAME</button>
-    <button id="btn-continue" class="secondary">CONTINUE</button>
-  </div>
-</div>
-
-<div id="pause-screen" class="screen hidden">
-  <div class="panel">
-    <h2>PAUSED</h2>
-    <p>Solmar Bay waits for no one. Well — right now it does.</p>
-    <button id="btn-resume">RESUME</button>
-    <button id="btn-restart" class="secondary">RESTART</button>
-    <button id="btn-quit" class="secondary">QUIT TO TITLE</button>
-  </div>
-</div>
-
-<div id="busted-screen" class="screen hidden">
-  <div class="panel">
-    <h2>BUSTED!</h2>
-    <p>The Solmar Bay police hauled Leo in. Rocco's debt is still waiting — and so is Ada's next job.</p>
-    <button id="btn-busted-retry">TRY AGAIN</button>
-  </div>
-</div>
-
-<div id="mission-complete" class="screen hidden">
-  <div class="panel">
-    <h2 id="mc-title"></h2>
-    <p id="mc-reward"></p>
-    <button id="btn-mc-continue">CONTINUE</button>
-  </div>
-</div>
-
+<div id="app"></div>
+<div id="hud"></div>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>
