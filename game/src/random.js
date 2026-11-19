@@ -1,9 +1,8 @@
-// SOLMAR HEAT — seeded random (mulberry32). One seed drives the whole world
-// so a fixed seed replays the same city, traffic and pedestrians.
-
+// SOLMAR HEAT — random: a tiny seeded RNG so the city layout is identical
+// on every load (screenshots included), while gameplay can still vary.
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function () {
+  return function next() {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -13,26 +12,18 @@ export function mulberry32(seed) {
 }
 
 export class RNG {
-  constructor(seed = 1337) {
+  constructor(seed) {
     this.next = mulberry32(seed);
   }
-  // Float in [0, 1).
-  f() {
-    return this.next();
+  range(a, b) {
+    return a + this.next() * (b - a);
   }
-  // Float in [min, max).
-  range(min, max) {
-    return min + this.next() * (max - min);
+  int(a, b) {
+    return Math.floor(this.range(a, b + 1));
   }
-  // Integer in [min, max] inclusive.
-  int(min, max) {
-    return Math.floor(this.range(min, max + 1));
-  }
-  // Pick one item from an array.
   pick(arr) {
     return arr[Math.floor(this.next() * arr.length)];
   }
-  // True with probability p.
   chance(p) {
     return this.next() < p;
   }

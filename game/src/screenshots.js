@@ -1,107 +1,95 @@
-// SOLMAR HEAT — screenshot scenes. ?shot=N in the URL drives the real game
-// forward from the fixed seed into a composed scene, then sets
-// window.__shotReady so the capture script knows the frame is ready.
-// 1 = cover (Leo on foot downtown), 2 = street (driving fast),
-// 3 = chase (2 wanted stars, police on the tail), 4 = mission (Package Run).
+// SOLMAR HEAT — screenshots: the four staged scenes the maker captures.
+// Each scene plays the real game forward from the fixed seed — a car on the
+// avenue, a street on foot, a police chase, a mission in progress — then
+// sets window.__shotReady so the capture script knows the frame is final.
+// This file is written by hand in the recorded session; no script generates it.
+import { PLACES } from './config.js';
 
-export function getShotParam() {
-  const m = /[?&]shot=(\d)/.exec(window.location.search);
-  return m ? parseInt(m[1], 10) : 0;
+export function shotName(n) {
+  return ['', 'cover', 'street', 'chase', 'mission'][n] || 'cover';
 }
 
-export function applyShot(game, n) {
-  const { player, missions, wanted, traffic, city } = game;
+// ctx: { player, vehicles, peds, missions, wanted, camera, city, state }
+export function applyShot(n, ctx) {
+  const { player, vehicles, peds, missions, wanted, camera, city } = ctx;
+  const avenueX = city.roadCenter(2);
+  const avenueZ = city.roadCenter(2);
+
   if (n === 1) {
-    // Cover: Leo on foot downtown, mission 1 card up.
-    player.reset({ x: -30, z: 10 });
-    player.heading = Math.PI / 2;
+    // COVER: Leo's car cruising the downtown avenue, towers all around,
+    // traffic ahead, sun low over the bay. Fixed cinematic camera.
+    const car = vehicles.spawnCar(avenueX, 20, 0, 0xc23b2e, {});
+    player.enterCar(car);
+    player.speed = 0;
+    car.speed = 8;
+    const t1 = vehicles.spawnCar(avenueX, -8, 0, 0x2e6fc2, { traffic: true });
+    t1.speed = 9;
+    t1.route = [{ x: avenueX, z: -80 }, { x: avenueX, z: 80 }];
+    const t2 = vehicles.spawnCar(avenueX + 12, 40, Math.PI, 0xe8c832, { traffic: true });
+    t2.speed = 9;
+    t2.route = [{ x: avenueX + 12, z: 80 }, { x: avenueX + 12, z: -80 }];
     missions.index = 0;
-    missions.state = 'active';
-    missions.phase = 'steal';
-    missions._clearObjective();
-    wanted.clear();
+    missions.step = 1;
+    missions.active = true;
+    missions.marker = { x: PLACES.garage.x, z: PLACES.garage.z, label: 'Ada\u2019s Garage' };
+    // Straight down the avenue from its centreline, high enough to clear
+    // the towers: the road, the traffic and the red car all in frame.
+    ctx.shotFixedCam = { x: avenueX, y: 13, z: 58, lx: avenueX, ly: 2, lz: -40 };
+    camera.setFixed(avenueX, 13, 58, avenueX, 2, -40);
   } else if (n === 2) {
-    // Street: Leo driving fast down an avenue.
-    const car = traffic.cars.find((c) => c.parked) || traffic.spawnParked(1)[0];
-    player.reset({ x: -120, z: -30 });
-    player.enterCar(car);
-    car.x = -120;
-    car.z = -30;
-    car.heading = 0;
-    car.speed = 30;
-    car.mesh.position.set(car.x, 0, car.z);
-    car.mesh.rotation.y = -car.heading;
-    missions.index = 0;
-    missions.state = 'active';
-    missions.phase = 'deliver';
-    const g = city.places.garage;
-    missions._setObjective(g.x, g.z, 6, 'Drive to Ada\u2019s garage');
-    wanted.clear();
+    // STREET: Leo on foot in the middle of the avenue, facing the beach,
+    // pedestrians and parked cars around, traffic rolling past.
+    player.reset(avenueX, avenueZ + 10);
+    player.heading = 0;
+    vehicles.spawnParked(4);
+    const t = vehicles.spawnCar(avenueX + 12, avenueZ - 30, Math.PI, 0x2e6fc2, { traffic: true });
+    t.speed = 9;
+    t.route = [{ x: avenueX + 12, z: -80 }, { x: avenueX + 12, z: 80 }];
+    // Pull three pedestrians onto the sidewalk beside Leo.
+    for (let i = 0; i < Math.min(3, peds.peds.length); i++) {
+      const p = peds.peds[i];
+      p.x = avenueX + 8 + i * 3;
+      p.z = avenueZ + 14 + i * 4;
+      p.state = 'walk';
+      p.target = { x: avenueX + 8 + i * 3, z: avenueZ + 40 };
+    }
+    ctx.shotFixedCam = null;
   } else if (n === 3) {
-    // Chase: 2 wanted stars, police closing in on a speeding Leo.
-    const car = traffic.cars.find((c) => c.parked) || traffic.spawnParked(1)[0];
-    player.reset({ x: 60, z: 30 });
+    // CHASE: 2 stars, two police cars right on Leo's bumper, sirens up.
+    const car = vehicles.spawnCar(avenueX, 30, 0, 0x3aa84f, {});
     player.enterCar(car);
-    car.x = 60;
-    car.z = 30;
-    car.heading = Math.PI;
-    car.speed = 32;
-    car.mesh.position.set(car.x, 0, car.z);
-    car.mesh.rotation.y = -car.heading;
-    wanted.setLevel(2);
-    wanted.placeNear(player.pos);
+    car.speed = 18;
+    wanted.setStars(2);
+    // The objective line should read as a chase, not a car theft.
     missions.index = 2;
-    missions.state = 'active';
-    missions.phase = 'escape';
-    missions._clearObjective();
-  } else if (n === 4) {
-    // Mission: Package Run in progress, timer running, Hotel Solmar ahead.
-    // The car sits on the vertical road x=30 heading south, so the camera
-    // behind it stays on the road too (never inside a building).
-    const car = traffic.cars.find((c) => c.parked) || traffic.spawnParked(1)[0];
-    player.reset({ x: 30, z: -30 });
+    missions.step = 0;
+    missions.active = true;
+    missions.marker = { x: PLACES.pier.x, z: PLACES.pier.z, label: 'Pier' };
+    const c1 = vehicles.spawnPolice(avenueX - 1, 44);
+    const c2 = vehicles.spawnPolice(avenueX + 2, 52);
+    c1.speed = 20;
+    c2.speed = 20;
+    const t = vehicles.spawnCar(avenueX - 12, -10, 0, 0xe8e8e8, { traffic: true });
+    t.speed = 9;
+    t.route = [{ x: avenueX - 12, z: -80 }, { x: avenueX - 12, z: 80 }];
+    ctx.shotFixedCam = null;
+  } else {
+    // MISSION: Package Run in progress — Leo driving to Hotel Solmar
+    // with the marker and the timer on the HUD.
+    const car = vehicles.spawnCar(6, 60, Math.PI, 0xc23b2e, {});
     player.enterCar(car);
-    car.x = 30;
-    car.z = -30;
-    car.heading = Math.PI / 2;
-    car.speed = 24;
-    car.mesh.position.set(car.x, 0, car.z);
-    car.mesh.rotation.y = -car.heading;
+    car.speed = 12;
     missions.index = 1;
-    missions.state = 'active';
-    missions.phase = 'deliver';
-    missions.packageHeld = true;
-    missions.timer = 80;
-    const h = city.places.hotel;
-    missions._setObjective(h.x, h.z, 6, 'Deliver to Hotel Solmar');
-    wanted.clear();
+    missions.step = 1;
+    missions.active = true;
+    missions.timer = 62;
+    missions.marker = { x: PLACES.hotel.x, z: PLACES.hotel.z, label: 'Hotel Solmar' };
+    const t = vehicles.spawnCar(avenueX + 12, 10, Math.PI, 0x2e6fc2, { traffic: true });
+    t.speed = 9;
+    t.route = [{ x: avenueX + 12, z: 80 }, { x: avenueX + 12, z: -80 }];
+    ctx.shotFixedCam = null;
   }
-  game.shotMode = n;
-  game.shotFrames = 0;
-}
-
-// Advance a shot scene: let traffic, peds and the camera settle, keep the
-// player's car rolling, then mark the frame ready. Returns true when ready.
-export function stepShot(game, dt) {
-  game.shotFrames += 1;
-  const { player, traffic, pedestrians, wanted, missions } = game;
-  // Keep the player's car rolling at a steady speed for the driving shots,
-  // and move it (Car.update with no input moves by speed and places the
-  // mesh — without this the car would sit at the origin, invisible).
-  if (player.inCar && (game.shotMode === 2 || game.shotMode === 3 || game.shotMode === 4)) {
-    const car = player.car;
-    const target = game.shotMode === 3 ? 32 : game.shotMode === 2 ? 30 : 24;
-    car.speed += (target - car.speed) * Math.min(1, dt * 2);
-    car.update(dt, null, game.city);
-  }
-  traffic.update(dt);
-  pedestrians.update(dt, player.pos, player.speed);
-  if (game.shotMode === 3) wanted.update(dt, player, () => {});
-  // Camera + HUD update happens in the main loop. Ready after ~90 frames
-  // (enough for the camera to settle and traffic to move).
-  if (game.shotFrames >= 90) {
-    window.__shotReady = true;
-    return true;
-  }
-  return false;
+  // Let the world settle a moment, then tell the capture script the frame is final.
+  ctx.shotSettleUntil = performance.now() + 1500;
+  ctx.shotReady = false;
 }

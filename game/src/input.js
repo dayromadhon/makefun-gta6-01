@@ -1,73 +1,75 @@
-// SOLMAR HEAT — keyboard + mouse input. Keys are tracked by code so the
-// layout is stable; the game reads axes, not raw keys, wherever it can.
-
+// SOLMAR HEAT — input: keyboard + mouse state with per-frame edge detection.
 export class Input {
   constructor() {
-    this.keys = new Set();
-    this.pressed = new Set(); // edge-triggered: cleared each frame by consume()
-    this.mouseDown = false;
+    this.down = new Set();
+    this.pressed = new Set();
+    this.mouseX = 0;
+    this.mouseY = 0;
     this.mouseClicked = false;
-    this._onKeyDown = (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      this.pressed.add(e.code);
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
-    };
-    this._onKeyUp = (e) => this.keys.delete(e.code);
-    this._onMouseDown = () => {
-      this.mouseDown = true;
-      this.mouseClicked = true;
-    };
-    this._onMouseUp = () => {
-      this.mouseDown = false;
-    };
-    this._onBlur = () => {
-      this.keys.clear();
-      this.mouseDown = false;
-    };
-    window.addEventListener('keydown', this._onKeyDown);
-    window.addEventListener('keyup', this._onKeyUp);
-    window.addEventListener('mousedown', this._onMouseDown);
-    window.addEventListener('mouseup', this._onMouseUp);
-    window.addEventListener('blur', this._onBlur);
+    this.anyKey = false;
+    this.onFirstGesture = null;
+    this._gestureFired = false;
   }
 
-  down(code) {
-    return this.keys.has(code);
+  attach() {
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      if (!this.down.has(e.code)) this.pressed.add(e.code);
+      this.down.add(e.code);
+      this.anyKey = true;
+      this._gesture();
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
+        e.preventDefault();
+      }
+    });
+    window.addEventListener('keyup', (e) => {
+      this.down.delete(e.code);
+    });
+    window.addEventListener('blur', () => {
+      this.down.clear();
+    });
+    window.addEventListener('mousedown', (e) => {
+      this.mouseClicked = true;
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+      this._gesture();
+    });
+    window.addEventListener('mousemove', (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+    });
   }
+
+  _gesture() {
+    if (!this._gestureFired) {
+      this._gestureFired = true;
+      if (this.onFirstGesture) this.onFirstGesture();
+    }
+  }
+
+  isDown(code) {
+    return this.down.has(code);
+  }
+
   // True only on the frame the key went down.
-  hit(code) {
+  wasPressed(code) {
     return this.pressed.has(code);
   }
-  // Driving / walking axes, -1..1.
-  get throttle() {
-    let v = 0;
-    if (this.down('KeyW') || this.down('ArrowUp')) v += 1;
-    if (this.down('KeyS') || this.down('ArrowDown')) v -= 1;
-    return v;
+
+  // WASD / arrows as a -1..1 steering + throttle pair.
+  axes() {
+    let steer = 0;
+    if (this.isDown('KeyA') || this.isDown('ArrowLeft')) steer -= 1;
+    if (this.isDown('KeyD') || this.isDown('ArrowRight')) steer += 1;
+    let throttle = 0;
+    if (this.isDown('KeyW') || this.isDown('ArrowUp')) throttle += 1;
+    if (this.isDown('KeyS') || this.isDown('ArrowDown')) throttle -= 1;
+    return { steer, throttle };
   }
-  get steer() {
-    let v = 0;
-    if (this.down('KeyA') || this.down('ArrowLeft')) v -= 1;
-    if (this.down('KeyD') || this.down('ArrowRight')) v += 1;
-    return v;
-  }
-  get run() {
-    return this.down('ShiftLeft') || this.down('ShiftRight');
-  }
-  get handbrake() {
-    return this.down('Space');
-  }
-  // Call once per frame after the game has read the edge state.
-  consume() {
+
+  // Call at the end of each frame so edges only fire once.
+  endFrame() {
     this.pressed.clear();
     this.mouseClicked = false;
-  }
-  dispose() {
-    window.removeEventListener('keydown', this._onKeyDown);
-    window.removeEventListener('keyup', this._onKeyUp);
-    window.removeEventListener('mousedown', this._onMouseDown);
-    window.removeEventListener('mouseup', this._onMouseUp);
-    window.removeEventListener('blur', this._onBlur);
   }
 }

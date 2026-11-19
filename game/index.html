@@ -3,48 +3,108 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMAR HEAT — Solmar Bay</title>
+<title>SOLMAR HEAT — an open-world crime game</title>
 <style>
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0e12; font-family: 'Segoe UI', Arial, sans-serif; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0f14; font-family: 'Segoe UI', Arial, sans-serif; }
   #game { position: fixed; inset: 0; }
   #game canvas { display: block; }
+  .hidden { display: none !important; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; z-index: 5; }
-  #hud-top { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; align-items: center; }
-  #hud-stars { font-size: 26px; letter-spacing: 4px; color: #ffd21f; text-shadow: 0 2px 6px rgba(0,0,0,.7); }
-  #hud-cash { display: flex; flex-direction: column; align-items: flex-end; background: rgba(10,14,18,.55); padding: 6px 12px; border-radius: 8px; }
-  #hud-cash-v { font-size: 22px; font-weight: 700; color: #7ad97a; }
-  #hud-debt-v { font-size: 13px; color: #ff9a8a; }
-  #hud-health { position: absolute; left: 14px; bottom: 14px; width: 220px; height: 18px; background: rgba(10,14,18,.6); border-radius: 9px; overflow: hidden; }
-  #hud-health-fill { height: 100%; width: 100%; background: #4fc25a; transition: width .2s; }
-  #hud-health-v { position: absolute; right: 8px; top: 0; line-height: 18px; font-size: 12px; font-weight: 700; }
-  #hud-speed { position: absolute; right: 14px; bottom: 14px; text-align: right; background: rgba(10,14,18,.55); padding: 6px 12px; border-radius: 8px; }
-  #hud-speed-v { font-size: 30px; font-weight: 800; }
-  #hud-speed .unit { font-size: 13px; color: #bbb; margin-left: 4px; }
-  #hud-ammo-v { display: block; font-size: 13px; color: #ffd21f; }
-  #hud-mission { position: absolute; left: 14px; top: 12px; max-width: 320px; background: rgba(10,14,18,.6); padding: 10px 12px; border-radius: 8px; border-left: 4px solid #ffd21f; }
-  #hud-mission-title { font-size: 15px; font-weight: 700; }
-  #hud-mission-obj { font-size: 13px; color: #ddd; margin-top: 2px; }
-  #hud-mission-timer { font-size: 14px; color: #ffd21f; font-weight: 700; margin-top: 2px; }
-  #hud-minimap { position: absolute; right: 14px; top: 12px; border: 2px solid rgba(255,255,255,.35); border-radius: 8px; background: rgba(10,14,18,.6); }
-  #hud-toast { position: absolute; left: 50%; bottom: 90px; transform: translateX(-50%); background: rgba(10,14,18,.75); padding: 8px 16px; border-radius: 8px; font-size: 15px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
-  #hud-prompt { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%); font-size: 14px; color: #ffe9a8; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
-  #hud-menu { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(6,10,14,.72); pointer-events: auto; text-align: center; padding: 20px; }
-  #hud-menu.hidden { display: none; }
-  #hud-menu-title { font-size: 52px; font-weight: 900; letter-spacing: 6px; color: #ffd21f; text-shadow: 0 4px 18px rgba(0,0,0,.8); }
-  #hud-menu-sub { font-size: 16px; color: #cfe3f2; margin-top: 2px; }
-  #hud-menu-body { max-width: 560px; font-size: 15px; line-height: 1.55; color: #e8e8e8; margin-top: 14px; }
-  #hud-menu-btns { display: flex; gap: 12px; margin-top: 20px; }
-  .hud-btn { pointer-events: auto; cursor: pointer; font-size: 17px; font-weight: 700; color: #111; background: #ffd21f; border: none; border-radius: 8px; padding: 12px 22px; }
-  .hud-btn:hover { background: #ffe066; }
-  #hud-menu-hint { margin-top: 22px; font-size: 12px; color: #9aa8b5; }
+  #cash-box { position: absolute; top: 14px; left: 16px; background: rgba(0,0,0,0.55); padding: 10px 14px; border-radius: 8px; }
+  #cash { font-size: 28px; font-weight: 800; color: #7dff8a; }
+  #debt { font-size: 13px; color: #ffd94a; margin-top: 2px; }
+  #health-box { position: absolute; left: 16px; bottom: 16px; background: rgba(0,0,0,0.55); padding: 8px 12px; border-radius: 8px; width: 220px; }
+  #health-bar { height: 12px; background: #333; border-radius: 6px; overflow: hidden; margin-top: 4px; }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5533, #ff8844); }
+  #health-label { font-size: 12px; color: #ddd; }
+  #health-num { float: right; color: #fff; font-weight: 700; }
+  #stars { position: absolute; top: 14px; right: 190px; font-size: 30px; letter-spacing: 4px; color: #ffd94a; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  #minimap { position: absolute; top: 56px; right: 14px; width: 168px; height: 168px; border: 2px solid rgba(255,255,255,0.5); border-radius: 6px; background: rgba(0,0,0,0.4); }
+  #objective-box { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 10px 18px; border-radius: 8px; text-align: center; max-width: 46%; }
+  #objective { font-size: 16px; font-weight: 700; }
+  #objective-dist { font-size: 13px; color: #ffd94a; margin-top: 2px; }
+  #speed { position: absolute; right: 16px; bottom: 16px; background: rgba(0,0,0,0.55); padding: 8px 14px; border-radius: 8px; text-align: right; }
+  #speed-num { font-size: 30px; font-weight: 800; }
+  #speed-label { font-size: 11px; color: #ccc; }
+  #weapon-box { position: absolute; right: 16px; bottom: 96px; background: rgba(0,0,0,0.55); padding: 6px 12px; border-radius: 8px; font-size: 14px; }
+  #message { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 8px; font-size: 16px; opacity: 0; transition: opacity 0.4s; text-align: center; max-width: 70%; }
+  #controls-hint { position: absolute; left: 16px; bottom: 96px; font-size: 11px; color: rgba(255,255,255,0.65); background: rgba(0,0,0,0.4); padding: 6px 10px; border-radius: 6px; line-height: 1.5; }
+  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4, 10, 18, 0.82); z-index: 10; color: #fff; }
+  .panel { text-align: center; max-width: 560px; padding: 40px; }
+  .panel h1 { font-size: 64px; letter-spacing: 2px; color: #ffb02e; text-shadow: 0 4px 0 #7a2d12, 0 8px 24px rgba(0,0,0,0.7); }
+  .panel h2 { font-size: 34px; color: #ffd94a; margin-bottom: 10px; }
+  .panel p { font-size: 16px; line-height: 1.55; color: #ddd; margin: 12px 0; }
+  .panel .sub { color: #9fc4e8; font-size: 14px; }
+  .btn { pointer-events: auto; display: block; margin: 14px auto 0; padding: 13px 34px; font-size: 18px; font-weight: 700; color: #1a1a1a; background: #ffb02e; border: none; border-radius: 8px; cursor: pointer; min-width: 260px; }
+  .btn:hover { background: #ffc95e; }
+  .btn.secondary { background: #3a5a7a; color: #fff; }
+  .btn.secondary:hover { background: #4a6f96; }
+  #card-reward { color: #7dff8a; font-weight: 800; font-size: 20px; }
+  .keys { text-align: left; display: inline-block; font-size: 14px; line-height: 1.9; color: #ccc; margin-top: 8px; }
+  .keys b { color: #ffd94a; }
 </style>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.min.js" } }
-</script>
 </head>
 <body>
 <div id="game"></div>
-<div id="hud"></div>
+<div id="hud">
+  <div id="cash-box"><div id="cash">$0</div><div id="debt">Debt left: $4,500</div></div>
+  <div id="stars">☆☆☆☆☆</div>
+  <canvas id="minimap" width="168" height="168"></canvas>
+  <div id="objective-box"><div id="objective"></div><div id="objective-dist"></div></div>
+  <div id="health-box"><span id="health-label">Health <span id="health-num">100</span></span><div id="health-bar"><div id="health-fill"></div></div></div>
+  <div id="weapon-box"><span id="weapon">Fists</span> · <span id="ammo">—</span></div>
+  <div id="speed"><span id="speed-num">0</span><div id="speed-label">km/h</div></div>
+  <div id="message"></div>
+  <div id="controls-hint">WASD move / drive · E steal car · F punch<br>2 pistol, click shoot, R reload · Space handbrake<br>Shift run · P pause · M mute</div>
+</div>
+
+<div id="screen-title" class="screen">
+  <div class="panel">
+    <h1>SOLMAR HEAT</h1>
+    <p class="sub">An open-world crime game in the sun-soaked city of Solmar Bay</p>
+    <p>Leo Marin owes $4,500 to loan shark Rocco Vane. Dispatcher Ada Kwan has the jobs to pay it off — steal cars, run packages, lose the cops, drive the cab, and pull the big score.</p>
+    <div class="keys">
+      <b>WASD</b> move / drive &nbsp; <b>E</b> steal a car &nbsp; <b>F</b> punch<br>
+      <b>2</b> pistol, <b>click</b> shoot, <b>R</b> reload &nbsp; <b>Space</b> handbrake<br>
+      <b>Shift</b> run &nbsp; <b>P</b> pause &nbsp; <b>M</b> mute
+    </div>
+    <button id="btn-new" class="btn">New Game</button>
+    <button id="btn-continue" class="btn secondary">Continue</button>
+    <p id="title-save-note" class="sub"></p>
+  </div>
+</div>
+
+<div id="screen-pause" class="screen hidden">
+  <div class="panel">
+    <h2>Paused</h2>
+    <p>Solmar Bay waits for no one — except right now.</p>
+    <button id="btn-resume" class="btn">Resume</button>
+    <button id="btn-restart" class="btn secondary">Restart from title</button>
+  </div>
+</div>
+
+<div id="screen-busted" class="screen hidden">
+  <div class="panel">
+    <h2>BUSTED</h2>
+    <p id="busted-reason"></p>
+    <p>The clinic patched you up. It cost you $100.</p>
+    <button id="btn-busted-ok" class="btn">Back on the street</button>
+  </div>
+</div>
+
+<div id="screen-card" class="screen hidden">
+  <div class="panel">
+    <h2 id="card-title"></h2>
+    <p id="card-body"></p>
+    <p id="card-reward"></p>
+    <button id="btn-card-go" class="btn">Go</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.min.js" } }
+</script>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

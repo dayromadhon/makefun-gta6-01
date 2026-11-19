@@ -1,189 +1,160 @@
-// SOLMAR HEAT — HUD and menus. A DOM overlay (health, cash, debt, stars,
-// speed, ammo, mission card, minimap canvas) plus title / pause / busted /
-// mission-complete screens. The minimap is a 2D canvas drawn from the city.
+// SOLMAR HEAT — hud: the DOM overlay (cash, health, stars, speed,
+// objective, messages, screens) and the 2D minimap canvas.
+import { CFG } from './config.js';
 
 export class HUD {
-  constructor(city) {
-    this.city = city;
-    this.root = document.getElementById('hud');
-    this._build();
-    this.toastTimer = 0;
-  }
-  _build() {
-    this.root.innerHTML = `
-      <div id="hud-top">
-        <div id="hud-stars"></div>
-        <div id="hud-cash"><span id="hud-cash-v">$0</span><span id="hud-debt-v">Debt $4,500</span></div>
-      </div>
-      <div id="hud-health"><div id="hud-health-fill"></div><span id="hud-health-v">100</span></div>
-      <div id="hud-speed"><span id="hud-speed-v">0</span><span class="unit">km/h</span><span id="hud-ammo-v"></span></div>
-      <div id="hud-mission"><div id="hud-mission-title"></div><div id="hud-mission-obj"></div><div id="hud-mission-timer"></div></div>
-      <canvas id="hud-minimap" width="180" height="180"></canvas>
-      <div id="hud-toast"></div>
-      <div id="hud-prompt"></div>
-      <div id="hud-menu" class="hidden">
-        <div id="hud-menu-title">SOLMAR HEAT</div>
-        <div id="hud-menu-sub">Solmar Bay &middot; a Leo Marin story</div>
-        <div id="hud-menu-body"></div>
-        <div id="hud-menu-btns"></div>
-        <div id="hud-menu-hint">WASD drive &amp; walk &middot; E steal / exit car &middot; F punch &middot; Click / J shoot &middot; R reload &middot; Space handbrake &middot; P pause &middot; M mute</div>
-      </div>`;
-    this.el = {
-      stars: document.getElementById('hud-stars'),
-      cash: document.getElementById('hud-cash-v'),
-      debt: document.getElementById('hud-debt-v'),
-      healthFill: document.getElementById('hud-health-fill'),
-      healthV: document.getElementById('hud-health-v'),
-      speed: document.getElementById('hud-speed-v'),
-      ammo: document.getElementById('hud-ammo-v'),
-      missionTitle: document.getElementById('hud-mission-title'),
-      missionObj: document.getElementById('hud-mission-obj'),
-      missionTimer: document.getElementById('hud-mission-timer'),
-      minimap: document.getElementById('hud-minimap'),
-      toast: document.getElementById('hud-toast'),
-      prompt: document.getElementById('hud-prompt'),
-      menu: document.getElementById('hud-menu'),
-      menuTitle: document.getElementById('hud-menu-title'),
-      menuBody: document.getElementById('hud-menu-body'),
-      menuBtns: document.getElementById('hud-menu-btns'),
-    };
+  constructor() {
+    this.el = {};
+    for (const id of ['cash', 'debt', 'health-fill', 'health-num', 'stars', 'speed', 'speed-num', 'objective', 'objective-dist', 'message', 'minimap', 'screen-title', 'screen-pause', 'screen-busted', 'screen-card', 'card-title', 'card-body', 'card-reward', 'busted-reason', 'btn-new', 'btn-continue', 'btn-resume', 'btn-restart', 'btn-card-go', 'btn-busted-ok', 'title-save-note', 'ammo', 'weapon']) {
+      this.el[id] = document.getElementById(id);
+    }
     this.mapCtx = this.el.minimap.getContext('2d');
+    this.messageTimer = 0;
   }
-  toast(text, seconds = 3) {
-    this.el.toast.textContent = text;
-    this.el.toast.style.opacity = '1';
-    this.toastTimer = seconds;
+
+  setCash(cash) {
+    this.el.cash.textContent = `$${cash.toLocaleString()}`;
   }
-  prompt(text) {
-    this.el.prompt.textContent = text || '';
+
+  setDebt(left) {
+    this.el.debt.textContent = left > 0 ? `Debt left: $${left.toLocaleString()}` : 'DEBT PAID — Solmar is yours';
   }
-  update(dt, game) {
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0) this.el.toast.style.opacity = '0';
+
+  setHealth(h) {
+    this.el['health-fill'].style.width = `${Math.max(0, h)}%`;
+    this.el['health-num'].textContent = Math.ceil(h);
+  }
+
+  setStars(n) {
+    let s = '';
+    for (let i = 0; i < CFG.maxWanted; i++) s += i < n ? '★' : '☆';
+    this.el.stars.textContent = s;
+    this.el.stars.style.color = n >= 3 ? '#ff4444' : '#ffd94a';
+  }
+
+  setSpeed(v) {
+    const kmh = Math.round(Math.abs(v) * 3.6);
+    this.el['speed-num'].textContent = kmh;
+    this.el.speed.style.display = v === 0 ? 'none' : 'block';
+  }
+
+  setAmmo(weapon, mag, reserve) {
+    this.el.weapon.textContent = weapon === 'pistol' ? 'Pistol' : 'Fists';
+    this.el.ammo.textContent = weapon === 'pistol' ? `${mag} / ${reserve}` : '—';
+  }
+
+  setObjective(text, dist) {
+    this.el.objective.textContent = text;
+    this.el['objective-dist'].textContent = dist != null ? `${Math.round(dist)}m` : '';
+  }
+
+  showMessage(text, secs = 3) {
+    this.el.message.textContent = text;
+    this.el.message.style.opacity = '1';
+    this.messageTimer = secs;
+  }
+
+  update(dt) {
+    if (this.messageTimer > 0) {
+      this.messageTimer -= dt;
+      if (this.messageTimer <= 0) this.el.message.style.opacity = '0';
     }
-    // Stars.
-    let stars = '';
-    for (let i = 0; i < 5; i++) stars += i < game.wanted.level ? '★' : '☆';
-    this.el.stars.textContent = stars;
-    this.el.stars.style.color = game.wanted.level > 0 ? '#ffd21f' : '#888';
-    this.el.cash.textContent = `$${game.cash.toLocaleString()}`;
-    this.el.debt.textContent = game.debt > 0 ? `Debt $${game.debt.toLocaleString()}` : 'Debt PAID ✓';
-    this.el.debt.style.color = game.debt > 0 ? '#ff9a8a' : '#7ad97a';
-    const hp = Math.max(0, Math.round(game.player.health));
-    this.el.healthFill.style.width = `${hp}%`;
-    this.el.healthFill.style.background = hp > 50 ? '#4fc25a' : hp > 25 ? '#e8a62e' : '#d94f3d';
-    this.el.healthV.textContent = String(hp);
-    const kmh = Math.round(Math.abs(game.player.speed) * 3.6);
-    this.el.speed.textContent = String(kmh);
-    if (game.player.inCar) {
-      this.el.ammo.textContent = '';
-    } else {
-      this.el.ammo.textContent = `🔫 ${game.player.ammo}/${game.player.reserve}`;
-    }
-    // Mission card.
-    const m = game.missions.current;
-    if (m && game.missions.state === 'active') {
-      this.el.missionTitle.textContent = `Mission ${m.id}: ${m.name} — $${m.pay}`;
-      this.el.missionObj.textContent = game.missions.objective
-        ? game.missions.objective.label
-        : m.objective;
-      if (m.id === 2 && game.missions.phase === 'deliver') {
-        this.el.missionTimer.textContent = `⏱ ${Math.max(0, Math.ceil(game.missions.timer))}s`;
-      } else if (m.id === 4) {
-        this.el.missionTimer.textContent = `Fares ${game.missions.taxiDone}/${game.missions.taxiTarget}`;
-      } else {
-        this.el.missionTimer.textContent = '';
-      }
-    } else if (game.missions.allDone) {
-      this.el.missionTitle.textContent = 'Free roam — debt paid';
-      this.el.missionObj.textContent = 'Take a taxi fare or cruise Solmar Bay';
-      this.el.missionTimer.textContent = '';
-    } else {
-      this.el.missionTitle.textContent = '';
-      this.el.missionObj.textContent = '';
-      this.el.missionTimer.textContent = '';
-    }
-    this._drawMinimap(game);
   }
-  _drawMinimap(game) {
+
+  showScreen(name) {
+    for (const key of ['screen-title', 'screen-pause', 'screen-busted', 'screen-card']) {
+      this.el[key].classList.toggle('hidden', key !== name);
+    }
+  }
+
+  hideScreens() {
+    for (const key of ['screen-title', 'screen-pause', 'screen-busted', 'screen-card']) {
+      this.el[key].classList.add('hidden');
+    }
+  }
+
+  showCard(title, body, reward) {
+    this.el['card-title'].textContent = title;
+    this.el['card-body'].textContent = body;
+    this.el['card-reward'].textContent = reward || '';
+    this.showScreen('screen-card');
+  }
+
+  showBusted(reason) {
+    this.el['busted-reason'].textContent = reason;
+    this.showScreen('screen-busted');
+  }
+
+  // Top-down map: roads, water, player arrow, police dots, mission marker.
+  drawMinimap(world) {
     const ctx = this.mapCtx;
-    const S = 180;
-    const world = 420;
-    const toMap = (v) => ((v + world / 2) / world) * S;
+    const S = 168;
+    const half = CFG.half + 30;
+    const toMap = (x, z) => [((x + half) / (half * 2)) * S, ((z + half) / (half * 2)) * S];
     ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = 'rgba(20,24,28,0.85)';
+    ctx.fillStyle = 'rgba(20,40,28,0.85)';
     ctx.fillRect(0, 0, S, S);
-    // Water.
-    ctx.fillStyle = '#1d5f8a';
-    ctx.fillRect(0, toMap(190), S, S - toMap(190));
-    ctx.fillRect(toMap(157), 0, S - toMap(157), toMap(157));
-    // Beach.
-    ctx.fillStyle = '#d9c08a';
-    ctx.fillRect(0, toMap(157), S, toMap(190) - toMap(157));
+    // Water: south and east edges.
+    ctx.fillStyle = '#1e7fa8';
+    const [, sy] = toMap(0, CFG.half + 8);
+    ctx.fillRect(0, sy, S, S - sy);
+    const [ex] = toMap(CFG.half + 8, 0);
+    ctx.fillRect(ex, 0, S - ex, S);
     // Roads.
-    ctx.fillStyle = '#55585e';
-    for (const r of this.city.roads) {
-      if (r.axis === 'x') ctx.fillRect(0, toMap(r.at - 7), S, toMap(14) - toMap(0));
-      else ctx.fillRect(toMap(r.at - 7), 0, toMap(14) - toMap(0), S);
-    }
-    // Blocks.
-    ctx.fillStyle = '#3a3d42';
-    const step = 60;
-    for (let i = 0; i < 5; i++) {
-      for (let j = 0; j < 5; j++) {
-        ctx.fillRect(toMap(-150 + i * step), toMap(-150 + j * step), toMap(46) - toMap(0), toMap(46) - toMap(0));
-      }
-    }
-    // Objective marker (yellow diamond).
-    if (game.missions.objective) {
-      const o = game.missions.objective;
-      ctx.fillStyle = '#ffd21f';
-      const x = toMap(o.x);
-      const y = toMap(o.z);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 4;
+    for (const c of world.city.roadCenters) {
+      const [x1, y1] = toMap(c, -half);
+      const [x2, y2] = toMap(c, half);
       ctx.beginPath();
-      ctx.moveTo(x, y - 6);
-      ctx.lineTo(x + 5, y);
-      ctx.lineTo(x, y + 6);
-      ctx.lineTo(x - 5, y);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      const [x3, y3] = toMap(-half, c);
+      const [x4, y4] = toMap(half, c);
+      ctx.beginPath();
+      ctx.moveTo(x3, y3);
+      ctx.lineTo(x4, y4);
+      ctx.stroke();
+    }
+    // Mission marker: pulsing yellow diamond.
+    if (world.missions.marker) {
+      const [mx, my] = toMap(world.missions.marker.x, world.missions.marker.z);
+      const pulse = 5 + Math.sin(performance.now() * 0.006) * 2;
+      ctx.fillStyle = '#ffd94a';
+      ctx.beginPath();
+      ctx.moveTo(mx, my - pulse);
+      ctx.lineTo(mx + pulse, my);
+      ctx.lineTo(mx, my + pulse);
+      ctx.lineTo(mx - pulse, my);
       ctx.closePath();
       ctx.fill();
     }
-    // Police (blue dots).
-    ctx.fillStyle = '#5a8aff';
-    for (const p of game.wanted.police) {
+    // Traffic: grey dots. Police: red dots.
+    for (const car of world.vehicles.traffic) {
+      const [cx, cy] = toMap(car.x, car.z);
+      ctx.fillStyle = '#bbbbbb';
+      ctx.fillRect(cx - 1.5, cy - 1.5, 3, 3);
+    }
+    for (const cop of world.vehicles.police) {
+      const [cx, cy] = toMap(cop.x, cop.z);
+      ctx.fillStyle = '#ff3344';
       ctx.beginPath();
-      ctx.arc(toMap(p.x), toMap(p.z), 3, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Player (white arrow, rotated by heading).
-    const pp = game.player.pos;
+    // Player: white arrow pointing along the heading.
+    const [px, py] = toMap(world.player.x, world.player.z);
     ctx.save();
-    ctx.translate(toMap(pp.x), toMap(pp.z));
-    ctx.rotate(game.player.inCar ? -game.player.car.heading : -game.player.heading);
+    ctx.translate(px, py);
+    ctx.rotate(Math.PI - world.player.heading);
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(6, 0);
-    ctx.lineTo(-4, -4);
-    ctx.lineTo(-4, 4);
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4.5, 5);
+    ctx.lineTo(-4.5, 5);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
-  }
-  showMenu(title, bodyHtml, buttons) {
-    this.el.menuTitle.textContent = title;
-    this.el.menuBody.innerHTML = bodyHtml;
-    this.el.menuBtns.innerHTML = '';
-    for (const b of buttons) {
-      const btn = document.createElement('button');
-      btn.textContent = b.label;
-      btn.className = 'hud-btn';
-      btn.addEventListener('click', () => b.onClick());
-      this.el.menuBtns.appendChild(btn);
-    }
-    this.el.menu.classList.remove('hidden');
-  }
-  hideMenu() {
-    this.el.menu.classList.add('hidden');
   }
 }

@@ -1,86 +1,77 @@
-// SOLMAR HEAT — particles and screen feedback. A single Points pool is
-// reused for dust, sparks, smoke and muzzle flashes so nothing allocates
-// per frame.
-
+// SOLMAR HEAT — effects: pooled particle bursts, smoke puffs and the
+// tracer line for gunshots, all drawn with THREE.Points and Line.
 import * as THREE from 'three';
 
 export class Effects {
   constructor(scene) {
     this.scene = scene;
-    this.max = 400;
-    this.positions = new Float32Array(this.max * 3);
-    this.colors = new Float32Array(this.max * 3);
-    this.vel = new Float32Array(this.max * 3);
-    this.life = new Float32Array(this.max);
-    this.maxLife = new Float32Array(this.max);
-    this.geo = new THREE.BufferGeometry();
-    this.geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    this.mat = new THREE.PointsMaterial({
-      size: 0.55,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-    });
-    this.points = new THREE.Points(this.geo, this.mat);
-    this.points.frustumCulled = false;
-    this.scene.add(this.points);
-    this.cursor = 0;
-    this._color = new THREE.Color();
+    this.bursts = [];
+    this.tracers = [];
   }
-  burst(x, y, z, count, colorHex, speed = 6, up = 3, life = 0.7) {
-    this._color.setHex(colorHex);
-    for (let i = 0; i < count; i++) {
-      const idx = this.cursor;
-      this.cursor = (this.cursor + 1) % this.max;
+
+  _makePoints(n, color) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    const mat = new THREE.PointsMaterial({ color, size: 0.35, transparent: true, opacity: 1 });
+    const points = new THREE.Points(geo, mat);
+    points.frustumCulled = false;
+    this.scene.add(points);
+    return points;
+  }
+
+  burst(x, y, z, color, n = 12) {
+    const points = this._makePoints(n, color);
+    const pos = points.geometry.attributes.position.array;
+    const vel = [];
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
       const a = Math.random() * Math.PI * 2;
-      const s = speed * (0.4 + Math.random() * 0.6);
-      this.positions[idx * 3] = x;
-      this.positions[idx * 3 + 1] = y;
-      this.positions[idx * 3 + 2] = z;
-      this.vel[idx * 3] = Math.cos(a) * s;
-      this.vel[idx * 3 + 1] = up * (0.5 + Math.random());
-      this.vel[idx * 3 + 2] = Math.sin(a) * s;
-      this.colors[idx * 3] = this._color.r;
-      this.colors[idx * 3 + 1] = this._color.g;
-      this.colors[idx * 3 + 2] = this._color.b;
-      this.life[idx] = life * (0.6 + Math.random() * 0.4);
-      this.maxLife[idx] = this.life[idx];
+      const s = 3 + Math.random() * 6;
+      vel.push([Math.cos(a) * s, 2 + Math.random() * 5, Math.sin(a) * s]);
     }
-    this.geo.attributes.position.needsUpdate = true;
-    this.geo.attributes.color.needsUpdate = true;
+    this.bursts.push({ points, vel, life: 0.7, max: 0.7 });
   }
-  dust(x, z) {
-    this.burst(x, 0.4, z, 3, 0xb09a7a, 2, 1.2, 0.5);
+
+  tracer(from, to) {
+    const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.9 }));
+    this.scene.add(line);
+    this.tracers.push({ line, life: 0.12 });
   }
-  sparks(x, z) {
-    this.burst(x, 1, z, 14, 0xffd21f, 9, 4, 0.5);
-  }
-  smoke(x, z) {
-    this.burst(x, 1.2, z, 8, 0x555a60, 2, 3, 1.1);
-  }
-  muzzle(x, y, z, heading) {
-    this.burst(x + Math.cos(heading) * 1.2, y, z + Math.sin(heading) * 1.2, 6, 0xffe9a8, 7, 1, 0.25);
-  }
+
   update(dt) {
-    let any = false;
-    for (let i = 0; i < this.max; i++) {
-      if (this.life[i] <= 0) continue;
-      any = true;
-      this.life[i] -= dt;
-      this.positions[i * 3] += this.vel[i * 3] * dt;
-      this.positions[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
-      this.positions[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      this.vel[i * 3 + 1] -= 6 * dt;
-      if (this.positions[i * 3 + 1] < 0.1) {
-        this.positions[i * 3 + 1] = 0.1;
-        this.vel[i * 3 + 1] = 0;
+    for (let i = this.bursts.length - 1; i >= 0; i--) {
+      const b = this.bursts[i];
+      b.life -= dt;
+      const pos = b.points.geometry.attributes.position.array;
+      for (let j = 0; j < b.vel.length; j++) {
+        pos[j * 3] += b.vel[j][0] * dt;
+        pos[j * 3 + 1] += b.vel[j][1] * dt;
+        pos[j * 3 + 2] += b.vel[j][2] * dt;
+        b.vel[j][1] -= 12 * dt;
+        if (pos[j * 3 + 1] < 0.05) pos[j * 3 + 1] = 0.05;
       }
-      if (this.life[i] <= 0) {
-        this.positions[i * 3 + 1] = -100; // hide
+      b.points.geometry.attributes.position.needsUpdate = true;
+      b.points.material.opacity = Math.max(0, b.life / b.max);
+      if (b.life <= 0) {
+        this.scene.remove(b.points);
+        b.points.geometry.dispose();
+        b.points.material.dispose();
+        this.bursts.splice(i, 1);
       }
     }
-    if (any) this.geo.attributes.position.needsUpdate = true;
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      t.life -= dt;
+      t.line.material.opacity = Math.max(0, t.life / 0.12);
+      if (t.life <= 0) {
+        this.scene.remove(t.line);
+        t.line.geometry.dispose();
+        t.line.material.dispose();
+        this.tracers.splice(i, 1);
+      }
+    }
   }
 }

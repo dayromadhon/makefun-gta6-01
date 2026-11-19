@@ -1,46 +1,70 @@
-// SOLMAR HEAT — third-person camera. It follows the player (on foot or in
-// a car) from behind, smoothing its position and looking slightly ahead.
-
+// SOLMAR HEAT — camera: third-person follow with smoothing, a low chase
+// view when driving, and trauma-based screen shake.
 import * as THREE from 'three';
 
 export class CameraRig {
   constructor(camera) {
     this.camera = camera;
-    this.pos = new THREE.Vector3(0, 12, 18);
+    this.trauma = 0;
+    this.pos = new THREE.Vector3(0, 10, 50);
     this.look = new THREE.Vector3(0, 1, 0);
-    this.shake = 0;
   }
-  addShake(amount) {
-    this.shake = Math.min(1.2, this.shake + amount);
+
+  shake(amount) {
+    this.trauma = Math.min(1, this.trauma + amount);
   }
-  update(dt, player) {
-    const pp = player.pos;
-    const heading = player.inCar ? player.car.heading : player.heading;
-    const speed = player.speed;
-    // Distance and height grow with speed.
-    const dist = player.inCar ? 13 + speed * 0.14 : 9;
-    const height = player.inCar ? 5.5 + speed * 0.05 : 4.5;
-    const back = new THREE.Vector3(
-      pp.x - Math.cos(heading) * dist,
+
+  update(dt, target, driving) {
+    const heading = target.heading;
+    const back = driving ? 11 : 7.5;
+    const height = driving ? 4.6 : 3.6;
+    const wantPos = new THREE.Vector3(
+      target.x - Math.sin(heading) * back,
       height,
-      pp.z - Math.sin(heading) * dist,
+      target.z - Math.cos(heading) * back,
     );
-    // On foot the camera sits behind the facing direction; keep it simple
-    // and stable by easing toward the target.
-    const k = 1 - Math.exp(-dt * 5);
-    this.pos.lerp(back, k);
-    const lookTarget = new THREE.Vector3(
-      pp.x + Math.cos(heading) * 4,
-      1.2,
-      pp.z + Math.sin(heading) * 4,
+    const k = 1 - Math.exp(-6 * dt);
+    this.pos.lerp(wantPos, k);
+    const wantLook = new THREE.Vector3(
+      target.x + Math.sin(heading) * 6,
+      1.4,
+      target.z + Math.cos(heading) * 6,
     );
-    this.look.lerp(lookTarget, 1 - Math.exp(-dt * 8));
-    this.shake = Math.max(0, this.shake - dt * 2.2);
-    const sh = this.shake * this.shake;
-    const ox = (Math.random() - 0.5) * sh * 0.9;
-    const oy = (Math.random() - 0.5) * sh * 0.6;
-    const oz = (Math.random() - 0.5) * sh * 0.9;
-    this.camera.position.set(this.pos.x + ox, this.pos.y + oy, this.pos.z + oz);
-    this.camera.lookAt(this.look.x + ox, this.look.y + oy, this.look.z + oz);
+    this.look.lerp(wantLook, 1 - Math.exp(-8 * dt));
+    this.trauma = Math.max(0, this.trauma - dt * 1.4);
+    const sh = this.trauma * this.trauma;
+    const t = performance.now() * 0.03;
+    const ox = sh * 0.5 * Math.sin(t * 1.3);
+    const oy = sh * 0.4 * Math.cos(t * 1.7);
+    this.camera.position.set(this.pos.x + ox, this.pos.y + oy, this.pos.z);
+    this.camera.lookAt(this.look.x + ox, this.look.y + oy, this.look.z);
+  }
+
+  // Instantly place the camera at the follow position (no lerp) — used
+  // when a screenshot scene starts so the first frames are already framed.
+  snap(target, driving) {
+    const heading = target.heading;
+    const back = driving ? 11 : 7.5;
+    const height = driving ? 4.6 : 3.6;
+    this.pos.set(
+      target.x - Math.sin(heading) * back,
+      height,
+      target.z - Math.cos(heading) * back,
+    );
+    this.look.set(
+      target.x + Math.sin(heading) * 6,
+      1.4,
+      target.z + Math.cos(heading) * 6,
+    );
+    this.camera.position.copy(this.pos);
+    this.camera.lookAt(this.look);
+  }
+
+  // A fixed cinematic angle, used by the screenshot scenes.
+  setFixed(x, y, z, lx, ly, lz) {
+    this.pos.set(x, y, z);
+    this.look.set(lx, ly, lz);
+    this.camera.position.set(x, y, z);
+    this.camera.lookAt(lx, ly, lz);
   }
 }
